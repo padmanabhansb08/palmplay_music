@@ -367,8 +367,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 const savedLiked = await db.likedSongs.where('userId').equals(savedUser.email).toArray();
                 likedSongs = savedLiked.map(ls => ({
                     ...ls,
-                    art: ls.artBlob ? URL.createObjectURL(ls.artBlob) : (ls.art || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop')
+                    art: ls.artBlob ? URL.createObjectURL(ls.artBlob) : (ls.artUrl || ls.art || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop')
                 }));
+                
+                // Inject Audius liked tracks into temporary playlist so they can be played
+                const audiusLiked = likedSongs.filter(ls => ls.isAudius);
+                if (audiusLiked.length > 0) {
+                    let audiusPlIndex = playlists.findIndex(pl => pl.id === 'audius_search');
+                    if (audiusPlIndex === -1) {
+                        playlists.push({
+                            id: 'audius_search',
+                            name: 'Audius Search Results',
+                            tracks: [],
+                            isTemporary: true
+                        });
+                        audiusPlIndex = playlists.length - 1;
+                    }
+                    audiusLiked.forEach(ls => {
+                        if (!playlists[audiusPlIndex].tracks.find(t => t.name === ls.trackName && t.artist === ls.artist)) {
+                            playlists[audiusPlIndex].tracks.push({
+                                name: ls.trackName,
+                                artist: ls.artist,
+                                album: ls.album,
+                                duration: ls.duration,
+                                url: ls.url,
+                                art: ls.art,
+                                isAudius: true
+                            });
+                        }
+                    });
+                }
             } catch (likedErr) {
                 console.log('Liked songs table not ready yet:', likedErr);
                 likedSongs = [];
@@ -1134,6 +1162,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
     }
 
+    let audiusSearchTimeout = null;
+
     function renderSearch() {
         searchContainer.style.display = 'flex';
         greetingEl.style.display = 'none';
@@ -1141,14 +1171,19 @@ document.addEventListener('DOMContentLoaded', () => {
         cardGrid.innerHTML = '';
         cardGrid.style.display = 'grid';
 
-        // Flatten all tracks for search
-        const allTracks = playlists.flatMap((pl, plIdx) =>
-            pl.tracks.map((t, tIdx) => ({ ...t, plIdx, tIdx }))
-        );
+        // Flatten all tracks for search, maintaining original playlist indexes
+        const allTracks = [];
+        playlists.forEach((pl, plIdx) => {
+            if (!pl.isTemporary) {
+                pl.tracks.forEach((t, tIdx) => {
+                    allTracks.push({ ...t, plIdx, tIdx });
+                });
+            }
+        });
 
         allTracks.forEach(track => {
             const card = document.createElement('div');
-            card.className = 'card';
+            card.className = 'card local-card';
             card.innerHTML = `
                 <div class="card-image" style="background-image: url(${track.art})">
                     <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
@@ -1160,24 +1195,122 @@ document.addEventListener('DOMContentLoaded', () => {
             cardGrid.appendChild(card);
         });
 
+        // Add container for audius results
+        const audiusContainer = document.createElement('div');
+        audiusContainer.id = 'audius-results';
+        audiusContainer.style.gridColumn = '1 / -1';
+        audiusContainer.style.marginTop = '20px';
+        audiusContainer.innerHTML = '<h3 style="color:var(--primary); margin-bottom: 16px;">External Results</h3><div class="card-grid" id="audius-card-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px;"></div>';
+        audiusContainer.style.display = 'none';
+        cardGrid.appendChild(audiusContainer);
+
         if (allTracks.length === 0) {
-            cardGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Add some folders to search through your music!</p>';
+            const emptyMsg = document.createElement('p');
+            emptyMsg.className = 'empty-search-msg';
+            emptyMsg.style.color = 'var(--text-subdued)';
+            emptyMsg.style.padding = '20px';
+            emptyMsg.innerHTML = 'Search to explore millions of external tracks, or add folders to search your local music!';
+            cardGrid.appendChild(emptyMsg);
         }
     }
 
-    function filterCards(query) {
+    async function filterCards(query) {
         const lowQuery = query.toLowerCase();
-        const cards = cardGrid.querySelectorAll('.card');
 
         // This logic depends on whether we are in search view or home view
         if (state.currentView === 'search') {
-            const allTracks = playlists.flatMap(pl => pl.tracks);
-            cards.forEach((card, index) => {
+            const localCards = cardGrid.querySelectorAll('.local-card');
+            const allTracks = [];
+            playlists.forEach((pl, plIdx) => {
+                if (!pl.isTemporary) {
+                    pl.tracks.forEach((t, tIdx) => {
+                        allTracks.push({ ...t, plIdx, tIdx });
+                    });
+                }
+            });
+
+            localCards.forEach((card, index) => {
                 const track = allTracks[index];
                 const isMatch = track.name.toLowerCase().includes(lowQuery) ||
                     track.artist.toLowerCase().includes(lowQuery);
                 card.style.display = isMatch ? 'block' : 'none';
             });
+            
+            const emptyMsg = cardGrid.querySelector('.empty-search-msg');
+            if (emptyMsg) {
+                emptyMsg.style.display = localCards.length === 0 && !query ? 'block' : 'none';
+            }
+
+            // Debounced Audius Fetch
+            clearTimeout(audiusSearchTimeout);
+            const audiusContainer = document.getElementById('audius-results');
+            const audiusGrid = document.getElementById('audius-card-grid');
+            
+            if (query.trim().length < 2) {
+                audiusContainer.style.display = 'none';
+                return;
+            }
+
+            audiusContainer.style.display = 'block';
+            audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;"><i class="fas fa-spinner fa-spin"></i> Searching Audius Network...</p>';
+
+            audiusSearchTimeout = setTimeout(async () => {
+                try {
+                    const res = await fetch(`https://discoveryprovider.audius.co/v1/tracks/search?query=${encodeURIComponent(query)}&app_name=PalmPlay`);
+                    const data = await res.json();
+                    const audiusTracks = data.data || [];
+                    
+                    audiusGrid.innerHTML = '';
+                    
+                    if (audiusTracks.length === 0) {
+                        audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No external tracks found.</p>';
+                        return;
+                    }
+                    
+                    // Update or create temporary Audius playlist
+                    let audiusPlIndex = playlists.findIndex(pl => pl.id === 'audius_search');
+                    if (audiusPlIndex === -1) {
+                        audiusPlIndex = playlists.length;
+                        playlists.push({
+                            id: 'audius_search',
+                            name: 'Audius Search Results',
+                            tracks: [],
+                            isTemporary: true
+                        });
+                    }
+                    
+                    const mappedTracks = audiusTracks.map(t => ({
+                        id: t.id,
+                        name: t.title,
+                        artist: t.user?.name || 'Unknown',
+                        album: 'Audius',
+                        duration: t.duration,
+                        url: `https://discoveryprovider.audius.co/v1/tracks/${t.id}/stream?app_name=PalmPlay`,
+                        art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop',
+                        isAudius: true
+                    }));
+                    
+                    playlists[audiusPlIndex].tracks = mappedTracks;
+                    
+                    mappedTracks.forEach((track, tIdx) => {
+                        const card = document.createElement('div');
+                        card.className = 'card';
+                        card.innerHTML = `
+                            <div class="card-image" style="background-image: url(${track.art})">
+                                <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+                            </div>
+                            <div class="card-title">${track.name}</div>
+                            <div class="card-desc">${track.artist}</div>
+                        `;
+                        card.onclick = () => playTrack(audiusPlIndex, tIdx);
+                        audiusGrid.appendChild(card);
+                    });
+                    
+                } catch (e) {
+                    console.error("Audius API Error:", e);
+                    audiusGrid.innerHTML = '<p style="color:#ff4444; padding:20px;">Failed to fetch external tracks.</p>';
+                }
+            }, 600);
         }
     }
 
@@ -1242,7 +1375,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 dateAdded: new Date().toISOString(),
                 artBlob: track.artBlob || null,
                 playlistId: playlists[plIndex]?.id || null,
-                trackIndex: tIndex
+                trackIndex: tIndex,
+                isAudius: track.isAudius || false,
+                url: track.isAudius ? track.url : null,
+                artUrl: track.isAudius ? track.art : null
             };
             try {
                 const newId = await db.likedSongs.add(likedData);
