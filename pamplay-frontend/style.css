@@ -1438,3 +1438,248 @@ body {
     transform: scale(1.15);
     opacity: 0.35;
 }
+
+/* ─── Language Landing Page ─────────────────────────────────────────────────── */
+.lang-page {
+    padding-bottom: 40px;
+}
+
+.lang-hero {
+    position: relative;
+    border-radius: var(--border-radius-lg);
+    padding: 48px 36px 40px;
+    margin-bottom: 24px;
+    min-height: 200px;
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+}
+
+.lang-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(0,0,0,0.5) 100%);
+    pointer-events: none;
+}
+
+.lang-back-btn {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 500px;
+    padding: 8px 18px;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+    z-index: 2;
+    transition: background 0.2s ease, transform 0.2s ease;
+    font-family: 'Outfit', sans-serif;
+}
+
+.lang-back-btn:hover {
+    background: rgba(0,0,0,0.65);
+    transform: translateX(-2px);
+}
+
+.lang-hero-script {
+    position: absolute;
+    top: 50%;
+    right: 40px;
+    transform: translateY(-50%);
+    font-size: 120px;
+    font-weight: 800;
+    opacity: 0.12;
+    color: white;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.lang-hero-info {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+}
+
+.lang-hero-title {
+    font-size: 48px;
+    font-weight: 800;
+    color: white;
+    letter-spacing: -1px;
+    margin-bottom: 4px;
+    text-shadow: 0 4px 16px rgba(0,0,0,0.3);
+}
+
+.lang-hero-subtitle {
+    font-size: 15px;
+    color: rgba(255,255,255,0.75);
+}
+
+.lang-play-all-btn {
+    position: relative;
+    z-index: 1;
+    background: white;
+    color: #000;
+    border: none;
+    border-radius: 500px;
+    padding: 14px 32px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    font-family: 'Outfit', sans-serif;
+    flex-shrink: 0;
+    margin-left: 24px;
+}
+
+.lang-play-all-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+
+.lang-play-all-btn i {
+    margin-right: 8px;
+}
+
+/* Mood Chips Row */
+.lang-mood-chips-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+    padding: 0 4px;
+}
+
+.lang-mood-chip {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 500px;
+    padding: 8px 18px;
+    color: var(--text-subdued);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    font-family: 'Outfit', sans-serif;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.lang-mood-chip:hover {
+    background: rgba(255,255,255,0.12);
+    color: white;
+    transform: translateY(-1px);
+}
+
+.lang-mood-chip.active {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+    box-shadow: 0 4px 12px rgba(255,0,0,0.25);
+}
+
+/* Mood Sections */
+.lang-mood-section {
+    margin-bottom: 28px;
+}
+
+/* Horizontal Scroll Track Row */
+.lang-mood-scroll {
+    display: flex;
+    gap: 16px;
+    overflow-x: auto;
+    padding-bottom: 12px;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+}
+
+.lang-mood-scroll::-webkit-scrollbar {
+    height: 4px;
+}
+
+.lang-mood-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.15);
+    border-radius: 4px;
+}
+
+.lang-mood-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+/* Individual Track Card */
+.lang-track-card {
+    flex: 0 0 160px;
+    cursor: pointer;
+    transition: transform 0.25s ease;
+}
+
+.lang-track-card:hover {
+    transform: translateY(-4px);
+}
+
+.lang-track-art {
+    width: 160px;
+    height: 160px;
+    border-radius: var(--border-radius-md);
+    background-size: cover;
+    background-position: center;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.lang-track-art .play-btn-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.4);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    font-size: 20px;
+    color: white;
+}
+
+.lang-track-card:hover .play-btn-overlay {
+    opacity: 1;
+}
+
+.lang-track-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: white;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+}
+
+.lang-track-artist {
+    font-size: 11px;
+    color: var(--text-subdued);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 160px;
+}
+
+/* Mood Loader & Empty */
+.mood-loader {
+    color: var(--text-subdued);
+    font-size: 13px;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mood-empty {
+    color: var(--text-subdued);
+    font-size: 13px;
+    padding: 16px 0;
+}

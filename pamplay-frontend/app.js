@@ -1477,19 +1477,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Language browse cards with unique gradients and native script
         const languages = [
-            { name: 'Hindi',      query: 'Hindi songs',      script: 'हि', grad: 'linear-gradient(135deg, #F97316, #DC2626)' },
-            { name: 'Tamil',      query: 'Tamil songs',      script: 'த',  grad: 'linear-gradient(135deg, #8B5CF6, #6366F1)' },
-            { name: 'Telugu',     query: 'Telugu songs',      script: 'తె', grad: 'linear-gradient(135deg, #EC4899, #BE185D)' },
-            { name: 'Kannada',    query: 'Kannada songs',     script: 'ಕ',  grad: 'linear-gradient(135deg, #10B981, #059669)' },
-            { name: 'Malayalam',  query: 'Malayalam songs',   script: 'മ',  grad: 'linear-gradient(135deg, #06B6D4, #0284C7)' },
-            { name: 'Punjabi',    query: 'Punjabi songs',     script: 'ਪੰ', grad: 'linear-gradient(135deg, #EAB308, #CA8A04)' },
-            { name: 'English',    query: 'English pop',       script: 'En', grad: 'linear-gradient(135deg, #3B82F6, #1D4ED8)' },
-            { name: 'Korean',     query: 'K-pop',             script: '한', grad: 'linear-gradient(135deg, #E879F9, #A855F7)' },
-            { name: 'Spanish',    query: 'Spanish Latin',     script: 'Es', grad: 'linear-gradient(135deg, #EF4444, #B91C1C)' },
-            { name: 'Arabic',     query: 'Arabic music',      script: 'عر', grad: 'linear-gradient(135deg, #D97706, #92400E)' },
+            { name: 'Hindi',      script: 'हि', grad: 'linear-gradient(135deg, #F97316, #DC2626)',  moods: ['Romantic', 'Party', 'Chill', 'Devotional', 'Workout', 'Sad'] },
+            { name: 'Tamil',      script: 'த',  grad: 'linear-gradient(135deg, #8B5CF6, #6366F1)',  moods: ['Romantic', 'Kuthu', 'Melody', 'Devotional', 'Mass', 'Chill'] },
+            { name: 'Telugu',     script: 'తె', grad: 'linear-gradient(135deg, #EC4899, #BE185D)',  moods: ['Romantic', 'Party', 'Melody', 'Devotional', 'Mass', 'Chill'] },
+            { name: 'Kannada',    script: 'ಕ',  grad: 'linear-gradient(135deg, #10B981, #059669)',  moods: ['Romantic', 'Party', 'Melody', 'Devotional', 'Chill', 'Folk'] },
+            { name: 'Malayalam',  script: 'മ',  grad: 'linear-gradient(135deg, #06B6D4, #0284C7)',  moods: ['Romantic', 'Chill', 'Melody', 'Devotional', 'Folk', 'Party'] },
+            { name: 'Punjabi',    script: 'ਪੰ', grad: 'linear-gradient(135deg, #EAB308, #CA8A04)',  moods: ['Bhangra', 'Party', 'Romantic', 'Chill', 'Workout', 'Sad'] },
+            { name: 'English',    script: 'En', grad: 'linear-gradient(135deg, #3B82F6, #1D4ED8)',  moods: ['Pop', 'Hip-Hop', 'Rock', 'Chill', 'R&B', 'EDM'] },
+            { name: 'Korean',     script: '한', grad: 'linear-gradient(135deg, #E879F9, #A855F7)',  moods: ['K-Pop', 'Ballad', 'Hip-Hop', 'R&B', 'Chill', 'Dance'] },
+            { name: 'Spanish',    script: 'Es', grad: 'linear-gradient(135deg, #EF4444, #B91C1C)',  moods: ['Reggaeton', 'Latin Pop', 'Bachata', 'Chill', 'Party', 'Romantic'] },
+            { name: 'Arabic',     script: 'عر', grad: 'linear-gradient(135deg, #D97706, #92400E)',  moods: ['Pop', 'Classic', 'Chill', 'Romantic', 'Party', 'Folk'] },
         ];
-        const langCards = languages.map(l =>
-            `<div class="genre-browse-card" style="background: ${l.grad}" onclick="document.querySelector('.premium-search-input').value='${l.query}'; document.querySelector('.premium-search-input').dispatchEvent(new Event('input'));">
+        window._palmplayLanguages = languages; // expose for renderLanguagePage
+
+        const langCards = languages.map((l, idx) =>
+            `<div class="genre-browse-card" style="background: ${l.grad}" onclick="window._openLanguagePage(${idx})">
                 <span class="lang-script-char">${l.script}</span>
                 <span class="genre-card-label">${l.name}</span>
             </div>`
@@ -1707,6 +1709,180 @@ document.addEventListener('DOMContentLoaded', () => {
         })();
         // ────────────────────────────────────────────────────────────────────────
     }
+
+    // ─── Language Landing Page ─────────────────────────────────────────────────
+    window._openLanguagePage = function(langIdx) {
+        const lang = window._palmplayLanguages[langIdx];
+        if (lang) renderLanguagePage(lang);
+    };
+
+    async function renderLanguagePage(lang) {
+        state.currentView = 'language';
+        searchContainer.style.display = 'none';
+        viewHeader.style.display = 'none';
+        if (exploreHero) exploreHero.style.display = 'none';
+        if (categoryChips) categoryChips.style.display = 'none';
+        cardGrid.style.display = 'block';
+        cardGrid.innerHTML = '';
+
+        const moodIcons = {
+            'Romantic': 'fa-heart', 'Party': 'fa-glass-cheers', 'Chill': 'fa-cloud-moon',
+            'Devotional': 'fa-pray', 'Workout': 'fa-dumbbell', 'Sad': 'fa-cloud-rain',
+            'Kuthu': 'fa-drum', 'Melody': 'fa-music', 'Mass': 'fa-bolt', 'Folk': 'fa-leaf',
+            'Bhangra': 'fa-drum', 'Pop': 'fa-star', 'Hip-Hop': 'fa-microphone',
+            'Rock': 'fa-guitar', 'R&B': 'fa-heart', 'EDM': 'fa-bolt',
+            'K-Pop': 'fa-star', 'Ballad': 'fa-feather', 'Dance': 'fa-shoe-prints',
+            'Reggaeton': 'fa-fire', 'Latin Pop': 'fa-sun', 'Bachata': 'fa-heart',
+            'Classic': 'fa-landmark', 'Focus': 'fa-brain'
+        };
+
+        // Build mood chips
+        const moodChips = lang.moods.map((mood, i) =>
+            `<button class="lang-mood-chip ${i === 0 ? 'active' : ''}" data-mood="${mood}" data-lang="${lang.name}">
+                <i class="fas ${moodIcons[mood] || 'fa-music'}"></i> ${mood}
+            </button>`
+        ).join('');
+
+        // Build mood rows (each will load independently)
+        const moodRows = lang.moods.map(mood =>
+            `<div class="lang-mood-section" id="mood-${mood.replace(/[^a-zA-Z]/g, '')}">
+                <h3 class="browse-section-title">
+                    <i class="fas ${moodIcons[mood] || 'fa-music'}" style="color:var(--primary); margin-right:8px;"></i>${lang.name} ${mood}
+                </h3>
+                <div class="lang-mood-scroll" id="mood-grid-${mood.replace(/[^a-zA-Z]/g, '')}">
+                    <div class="mood-loader"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+                </div>
+            </div>`
+        ).join('');
+
+        cardGrid.innerHTML = `
+            <div class="lang-page" style="animation: hubFadeIn 0.4s ease;">
+                <div class="lang-hero" style="background: ${lang.grad}">
+                    <button class="lang-back-btn" onclick="document.querySelector('.nav-item:last-child').click()">
+                        <i class="fas fa-arrow-left"></i> Back
+                    </button>
+                    <div class="lang-hero-script">${lang.script}</div>
+                    <div class="lang-hero-info">
+                        <h1 class="lang-hero-title">${lang.name}</h1>
+                        <p class="lang-hero-subtitle">Explore ${lang.moods.length} moods · Powered by Audius</p>
+                    </div>
+                    <button class="lang-play-all-btn" id="lang-play-all">
+                        <i class="fas fa-play"></i> Play All
+                    </button>
+                </div>
+
+                <div class="lang-mood-chips-row">
+                    ${moodChips}
+                </div>
+
+                <div class="lang-mood-rows">
+                    ${moodRows}
+                </div>
+            </div>
+        `;
+
+        // Back button via Search nav link
+        const backBtn = cardGrid.querySelector('.lang-back-btn');
+        if (backBtn) {
+            backBtn.onclick = (e) => {
+                e.preventDefault();
+                state.currentView = 'search';
+                renderSearch();
+            };
+        }
+
+        // Mood chip click → scroll to that section
+        cardGrid.querySelectorAll('.lang-mood-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                cardGrid.querySelectorAll('.lang-mood-chip').forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                const targetId = 'mood-' + chip.dataset.mood.replace(/[^a-zA-Z]/g, '');
+                const target = document.getElementById(targetId);
+                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        });
+
+        // Resolve healthy API host once
+        let apiHost = 'https://discoveryprovider.audius.co';
+        try {
+            const hostRes = await fetch('https://api.audius.co', { signal: AbortSignal.timeout(3000) });
+            const hostData = await hostRes.json();
+            if (hostData?.data?.length > 0) apiHost = hostData.data[0];
+        } catch(_) {}
+
+        // Fetch each mood row independently
+        let allMoodTracks = [];
+        for (const mood of lang.moods) {
+            const safeId = mood.replace(/[^a-zA-Z]/g, '');
+            const grid = document.getElementById(`mood-grid-${safeId}`);
+            if (!grid) continue;
+
+            try {
+                const query = `${lang.name} ${mood}`;
+                const res = await fetch(
+                    `${apiHost}/v1/tracks/search?query=${encodeURIComponent(query)}&limit=15&app_name=PalmPlay`,
+                    { signal: AbortSignal.timeout(8000) }
+                );
+                const data = await res.json();
+                const tracks = data.data || [];
+
+                if (tracks.length === 0) {
+                    grid.innerHTML = '<p class="mood-empty">No tracks found for this mood.</p>';
+                    continue;
+                }
+
+                // Create playlist for this mood
+                const plId = `lang_${lang.name}_${safeId}`;
+                let plIdx = playlists.findIndex(p => p.id === plId);
+                if (plIdx === -1) {
+                    plIdx = playlists.length;
+                    playlists.push({ id: plId, name: `${lang.name} ${mood}`, tracks: [], isTemporary: true });
+                }
+
+                const mapped = tracks.map(t => ({
+                    id: t.id, name: t.title, artist: t.user?.name || 'Unknown',
+                    album: t.genre || mood, duration: t.duration,
+                    plays: t.play_count || 0,
+                    url: `${apiHost}/v1/tracks/${t.id}/stream?app_name=PalmPlay`,
+                    art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop',
+                    isAudius: true
+                }));
+                playlists[plIdx].tracks = mapped;
+                allMoodTracks = allMoodTracks.concat(mapped.map((t, i) => ({ plIdx, tIdx: i })));
+
+                grid.innerHTML = '';
+                mapped.forEach((track, tIdx) => {
+                    const card = document.createElement('div');
+                    card.className = 'lang-track-card';
+                    const playsLabel = track.plays > 0 ? `${(track.plays / 1000).toFixed(0)}K` : '';
+                    card.innerHTML = `
+                        <div class="lang-track-art" style="background-image: url(${track.art})">
+                            <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+                            ${playsLabel ? `<span class="plays-badge"><i class="fas fa-headphones" style="margin-right:3px"></i>${playsLabel}</span>` : ''}
+                        </div>
+                        <div class="lang-track-name">${track.name}</div>
+                        <div class="lang-track-artist">${track.artist}</div>
+                    `;
+                    card.onclick = () => playTrack(plIdx, tIdx);
+                    grid.appendChild(card);
+                });
+
+            } catch (e) {
+                grid.innerHTML = '<p class="mood-empty">Failed to load.</p>';
+            }
+        }
+
+        // Play All button: play first available track
+        const playAllBtn = document.getElementById('lang-play-all');
+        if (playAllBtn && allMoodTracks.length > 0) {
+            playAllBtn.onclick = () => {
+                const first = allMoodTracks[0];
+                playTrack(first.plIdx, first.tIdx);
+                showToast(`Playing ${lang.name} Collection`, 'fa-play');
+            };
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────────
 
     async function filterCards(query) {
         const lowQuery = query.toLowerCase();
