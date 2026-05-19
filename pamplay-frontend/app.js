@@ -470,6 +470,19 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
+        // Category Chips for Explore Page
+        const chips = document.querySelectorAll('.chip');
+        chips.forEach(chip => {
+            chip.addEventListener('click', (e) => {
+                chips.forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                const genre = chip.getAttribute('data-genre') || 'Trending';
+                if (window.renderExplore) {
+                    window.renderExplore(genre);
+                }
+            });
+        });
+
         // Shuffle Control
         const playerShuffle = document.querySelector('.player-bar .fa-random');
         if (playerShuffle) playerShuffle.addEventListener('click', toggleShuffle);
@@ -785,7 +798,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Dynamic Title based on Page
         const isExplore = window.location.pathname.includes('explore.html');
-        sectionTitleEl.textContent = isExplore ? 'Default Songs' : 'Your Collection';
+        
+        if (isExplore) {
+            window.renderExplore = renderExplore;
+            const activeChip = document.querySelector('.chip.active');
+            const genre = activeChip ? activeChip.getAttribute('data-genre') : 'Trending';
+            renderExplore(genre);
+            return;
+        }
+
+        sectionTitleEl.textContent = 'Your Collection';
         header.style.backgroundColor = 'transparent';
 
         const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
@@ -835,6 +857,86 @@ document.addEventListener('DOMContentLoaded', () => {
                     <p><strong>Step 3:</strong> Your songs will automatically appear here with metadata!</p>
                 </div>
             `;
+        }
+    }
+
+    async function renderExplore(category) {
+        state.currentView = 'explore';
+        searchContainer.style.display = 'none';
+        viewHeader.style.display = 'block';
+        greetingEl.style.display = 'block';
+        if (exploreHero) exploreHero.style.display = 'flex';
+        if (categoryChips) categoryChips.style.display = 'flex';
+        
+        const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
+        greetingEl.textContent = `Explore the Treat to Your Ears, ${savedUser.name || 'Guest'}`;
+        sectionTitleEl.textContent = `${category} Tracks`;
+        header.style.backgroundColor = 'transparent';
+        
+        cardGrid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding: 40px; color: var(--text-subdued);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 16px;"></i><p>Loading Audius Network...</p></div>';
+        cardGrid.style.display = 'grid';
+        
+        try {
+            let url = '';
+            if (category === 'Trending') {
+                url = 'https://discoveryprovider.audius.co/v1/tracks/trending?app_name=PalmPlay&limit=20';
+            } else {
+                url = `https://discoveryprovider.audius.co/v1/tracks/search?query=${encodeURIComponent(category)}&app_name=PalmPlay`;
+            }
+            
+            const res = await fetch(url);
+            const data = await res.json();
+            const audiusTracks = data.data || [];
+            
+            cardGrid.innerHTML = '';
+            
+            if (audiusTracks.length === 0) {
+                cardGrid.innerHTML = '<div style="grid-column: 1/-1; color:var(--text-subdued); padding:20px;">No tracks found for this category.</div>';
+                return;
+            }
+            
+            // Create or update temporary Audius playlist for playback
+            let audiusPlIndex = playlists.findIndex(pl => pl.id === 'audius_explore');
+            if (audiusPlIndex === -1) {
+                audiusPlIndex = playlists.length;
+                playlists.push({
+                    id: 'audius_explore',
+                    name: 'Audius Explore',
+                    tracks: [],
+                    isTemporary: true
+                });
+            }
+            
+            const mappedTracks = audiusTracks.map(t => ({
+                id: t.id,
+                name: t.title,
+                artist: t.user?.name || 'Unknown',
+                album: 'Audius',
+                duration: t.duration,
+                url: `https://discoveryprovider.audius.co/v1/tracks/${t.id}/stream?app_name=PalmPlay`,
+                art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop',
+                isAudius: true
+            }));
+            
+            playlists[audiusPlIndex].tracks = mappedTracks;
+            
+            mappedTracks.forEach((track, tIdx) => {
+                const card = document.createElement('div');
+                card.className = 'card audius-card';
+                card.innerHTML = `
+                    <div class="card-image" style="background-image: url(${track.art})">
+                        <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+                    </div>
+                    <div class="card-title">${track.name}</div>
+                    <div class="card-desc">${track.artist}</div>
+                `;
+                card.onclick = () => playTrack(audiusPlIndex, tIdx);
+                cardGrid.appendChild(card);
+            });
+            
+        } catch (err) {
+            console.error("Explore API Error:", err);
+            cardGrid.innerHTML = '<div style="grid-column: 1/-1; color:#ff4444; padding:20px;">Failed to fetch tracks from Audius.</div>';
         }
     }
 
