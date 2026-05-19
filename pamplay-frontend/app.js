@@ -1438,8 +1438,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchJioSaavnTracks(query, limit = 30) {
         try {
-            const targetUrl = `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`;
-            const url = `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}`;
+            const url = `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`;
             const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
             const data = await res.json();
             if (data && data.success && data.data && data.data.results) {
