@@ -1965,14 +1965,6 @@ document.addEventListener('DOMContentLoaded', () => {
                             .sort((a, b) => b.score - a.score)
                             .map(st => st.track);
 
-                        // If strict filter yields absolutely nothing, fall back to loose matches but sort by score
-                        if (tracks.length === 0 && rawTracks.length > 0) {
-                            tracks = scoredTracks
-                                .sort((a, b) => b.score - a.score)
-                                .map(st => st.track)
-                                .slice(0, 10);
-                        }
-
                         if (tracks.length === 0) {
                             resultsGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No matching ' + lang.name + ' tracks found.</p>';
                             return;
