@@ -34,7 +34,39 @@ db.version(3).stores({
     console.log('Upgraded to DB version 3 with likedSongs store');
 });
 
+// ─── Audio Engine with Crossfade Support ─────────────────────────────────────
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const masterGain = audioCtx.createGain();
+masterGain.connect(audioCtx.destination);
+
 const audio = new Audio();
+audio.crossOrigin = 'anonymous';
+const currentSource = { node: null, gain: null, audio: audio };
+
+const fadeAudio = new Audio();
+fadeAudio.crossOrigin = 'anonymous';
+const fadeSource = { node: null, gain: null, audio: fadeAudio };
+
+const CROSSFADE_DURATION = 2.5; // seconds
+
+function connectAudioNode(src) {
+    if (src.node) { try { src.node.disconnect(); } catch(e){} }
+    const mediaNode = audioCtx.createMediaElementSource(src.audio);
+    const gainNode = audioCtx.createGain();
+    mediaNode.connect(gainNode);
+    gainNode.connect(masterGain);
+    src.node = mediaNode;
+    src.gain = gainNode;
+}
+
+// Initialise both sources
+connectAudioNode(currentSource);
+connectAudioNode(fadeSource);
+
+function setMasterVolume(vol) {
+    masterGain.gain.value = vol;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const dynamicWishes = [
     "A Pleasant Morning", "A Happy Morning", "A Refreshing Day",
@@ -318,6 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialization
     async function init() {
         setupEventListeners();
+        setupKeyboardShortcuts();
         await loadFromDatabase();
         updatePlayerUI();
     }
@@ -408,6 +441,123 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Failed to load songs:', error);
         }
     }
+
+    // ─── Dynamic Theme from Album Art ──────────────────────────────────────────
+    function applyDynamicTheme(artUrl) {
+        if (!artUrl || artUrl.includes('unsplash')) return;
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 16; canvas.height = 16; // tiny for speed
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, 16, 16);
+                const d = ctx.getImageData(0, 0, 16, 16).data;
+                let r = 0, g = 0, b = 0, count = 0;
+                for (let i = 0; i < d.length; i += 4) {
+                    // Skip near-black and near-white pixels
+                    const brightness = (d[i] + d[i+1] + d[i+2]) / 3;
+                    if (brightness > 20 && brightness < 235) {
+                        r += d[i]; g += d[i+1]; b += d[i+2]; count++;
+                    }
+                }
+                if (count === 0) return;
+                r = Math.round(r / count);
+                g = Math.round(g / count);
+                b = Math.round(b / count);
+
+                // Boost saturation: push dominant channel
+                const max = Math.max(r, g, b);
+                const boost = 1.4;
+                r = Math.min(255, max === r ? Math.round(r * boost) : Math.round(r * 0.7));
+                g = Math.min(255, max === g ? Math.round(g * boost) : Math.round(g * 0.7));
+                b = Math.min(255, max === b ? Math.round(b * boost) : Math.round(b * 0.7));
+
+                // Apply to CSS variables with smooth transition
+                const root = document.documentElement;
+                root.style.setProperty('--primary', `rgb(${r},${g},${b})`);
+                root.style.setProperty('--primary-hover', `rgba(${r},${g},${b},0.8)`);
+
+                // Also update the ambient background orb
+                const orb1 = document.getElementById('orb-1');
+                if (orb1) orb1.style.background = `radial-gradient(circle, rgba(${r},${g},${b},0.15) 0%, transparent 70%)`;
+            } catch(e) { /* CORS or canvas issue, skip */ }
+        };
+        img.src = artUrl;
+    }
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    // ─── Keyboard Shortcuts ───────────────────────────────────────────────────────
+    function setupKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            // Don't fire when typing in input fields
+            if (e.target.matches('input, textarea')) return;
+
+            switch (e.key) {
+                case ' ': // Space = Play/Pause
+                    e.preventDefault();
+                    if (audio.src) {
+                        togglePlay();
+                        showToast(state.isPlaying ? 'Paused' : 'Playing', state.isPlaying ? 'fa-pause' : 'fa-play');
+                    }
+                    break;
+                case 'ArrowRight': // → = Next track
+                    e.preventDefault();
+                    playNext();
+                    showToast('Next Track', 'fa-step-forward');
+                    break;
+                case 'ArrowLeft': // ← = Previous track
+                    e.preventDefault();
+                    playPrev();
+                    showToast('Previous Track', 'fa-step-backward');
+                    break;
+                case 'ArrowUp': // ↑ = Volume up
+                    e.preventDefault();
+                    state.volume = Math.min(1, state.volume + 0.1);
+                    audio.volume = state.volume;
+                    document.querySelector('.volume-fill').style.width = `${state.volume * 100}%`;
+                    showToast(`Volume: ${Math.round(state.volume * 100)}%`, 'fa-volume-up');
+                    break;
+                case 'ArrowDown': // ↓ = Volume down
+                    e.preventDefault();
+                    state.volume = Math.max(0, state.volume - 0.1);
+                    audio.volume = state.volume;
+                    document.querySelector('.volume-fill').style.width = `${state.volume * 100}%`;
+                    showToast(`Volume: ${Math.round(state.volume * 100)}%`, 'fa-volume-down');
+                    break;
+                case 'm': case 'M': // M = Mute toggle
+                    e.preventDefault();
+                    state.isMuted = !state.isMuted;
+                    audio.muted = state.isMuted;
+                    const muteIcon = document.getElementById('mute-btn');
+                    if (muteIcon) muteIcon.className = state.isMuted ? 'fas fa-volume-mute' : 'fas fa-volume-up';
+                    showToast(state.isMuted ? 'Muted' : 'Unmuted', state.isMuted ? 'fa-volume-mute' : 'fa-volume-up');
+                    break;
+                case 'l': case 'L': // L = Like current track
+                    e.preventDefault();
+                    if (state.currentPlaylistIndex !== -1) {
+                        const t = playlists[state.currentPlaylistIndex].tracks[state.currentTrackIndex];
+                        if (t) { toggleLike(t, state.currentPlaylistIndex, state.currentTrackIndex); }
+                    }
+                    break;
+                case 's': case 'S': // S = Shuffle
+                    e.preventDefault();
+                    toggleShuffle();
+                    showToast(state.isShuffle ? 'Shuffle On' : 'Shuffle Off', 'fa-random');
+                    break;
+            }
+        });
+
+        // Scroll wheel on player bar = volume
+        document.querySelector('.player-bar')?.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            state.volume = Math.max(0, Math.min(1, state.volume - e.deltaY * 0.001));
+            audio.volume = state.volume;
+            document.querySelector('.volume-fill').style.width = `${state.volume * 100}%`;
+        }, { passive: false });
+    }
+    // ─────────────────────────────────────────────────────────────────────────────
 
     function setupEventListeners() {
         // Toggle Add Music Menu
@@ -1070,17 +1220,45 @@ document.addEventListener('DOMContentLoaded', () => {
         state.currentTrackIndex = tIndex;
         const track = playlists[plIndex].tracks[tIndex];
 
-        // Stop any currently playing audio first
-        audio.pause();
-        audio.currentTime = 0;
+        // ── Crossfade Engine ────────────────────────────────────────────────────
+        // Resume AudioContext if suspended (browser policy)
+        if (audioCtx.state === 'suspended') audioCtx.resume();
 
+        const isFirstPlay = !audio.src;
+        const FADE = CROSSFADE_DURATION;
+        const now = audioCtx.currentTime;
+
+        if (!isFirstPlay && currentSource.gain) {
+            // Fade OUT current track
+            currentSource.gain.gain.setValueAtTime(currentSource.gain.gain.value, now);
+            currentSource.gain.gain.linearRampToValueAtTime(0, now + FADE);
+            setTimeout(() => {
+                audio.pause();
+                audio.currentTime = 0;
+            }, FADE * 1000);
+        } else {
+            audio.pause();
+            audio.currentTime = 0;
+        }
+
+        // Load new track and fade IN
         audio.src = track.url;
-        audio.volume = state.volume;
-        audio.playbackRate = state.playbackSpeed; // Keep speed setting
-        audio.play();
+        audio.playbackRate = state.playbackSpeed;
+        if (!state.isMuted) {
+            currentSource.gain.gain.setValueAtTime(isFirstPlay ? state.volume : 0, audioCtx.currentTime);
+            if (!isFirstPlay) {
+                currentSource.gain.gain.linearRampToValueAtTime(state.volume, audioCtx.currentTime + FADE);
+            }
+        }
+        audio.play().catch(e => console.warn('Play blocked:', e));
+        // ────────────────────────────────────────────────────────────────────────
 
         state.isPlaying = true;
         updatePlayerUI();
+
+        // ── Dynamic Theme from Album Art ────────────────────────────────────────
+        applyDynamicTheme(track.art);
+        // ────────────────────────────────────────────────────────────────────────
 
         // Update playlist view UI if active
         if (state.currentView === 'playlist') {
