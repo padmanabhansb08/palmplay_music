@@ -67,11 +67,9 @@
                 <div class="nav-controls">
                     <button class="control-btn"><i class="fas fa-chevron-left"></i></button>
                     <button class="control-btn"><i class="fas fa-chevron-right"></i></button>
-                    <div class="search-container" style="position: relative; margin-left:16px; display: none;">
-                        <i class="fas fa-search"
-                            style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-subdued);"></i>
-                        <input type="text" placeholder="What do you want to listen to?"
-                            style="background: var(--bg-highlight); border: none; border-radius: 500px; padding: 10px 12px 10px 40px; color: white; width: 300px; font-size: 14px;">
+                    <div class="search-container premium-search" style="display: none;">
+                        <i class="fas fa-search search-icon"></i>
+                        <input type="text" placeholder="Search Audius tracks & artists..." class="premium-search-input">
                     </div>
                 </div>
                 <div class="user-controls">
@@ -89,15 +87,14 @@
             <section class="content-wrapper">
                 <div id="explore-hero" class="hero-section">
                     <div class="hero-content">
-                        <span class="hero-badge">Featured for You</span>
-                        <h1 class="hero-title">Experience Fresh <br>Vibrations</h1>
-                        <p class="hero-subtitle">Discover curated tracks, trending artists, and mood-based collections
-                            tailored to your vibe.</p>
+                        <span class="hero-badge">Powered by Audius API</span>
+                        <h1 class="hero-title">Discover the <br>Decentralized Network</h1>
+                        <p class="hero-subtitle">Stream trending tracks and exclusive releases directly from independent artists worldwide.</p>
                         <div class="hero-actions">
-                            <button class="upgrade-btn hero-btn"><i class="fas fa-play" style="margin-right:8px"></i>
-                                Play Now</button>
-                            <button class="upgrade-btn hero-btn secondary"><i class="fas fa-plus"
-                                    style="margin-right:8px"></i> Save Collection</button>
+                            <button class="upgrade-btn hero-btn" onclick="document.querySelector('.premium-search-input')?.focus()"><i class="fas fa-search" style="margin-right:8px"></i>
+                                Search Audius</button>
+                            <button class="upgrade-btn hero-btn secondary" onclick="document.querySelector('.chip[data-genre=\'Trending\']')?.click()"><i class="fas fa-fire"
+                                    style="margin-right:8px"></i> Trending Now</button>
                         </div>
                     </div>
                 </div>

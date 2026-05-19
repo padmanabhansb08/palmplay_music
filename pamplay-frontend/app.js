@@ -1269,6 +1269,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderSearch() {
         searchContainer.style.display = 'flex';
         greetingEl.style.display = 'none';
+        if (exploreHero) exploreHero.style.display = 'none';
+        if (categoryChips) categoryChips.style.display = 'none';
         sectionTitleEl.textContent = 'Browse All Tracks';
         cardGrid.innerHTML = '';
         cardGrid.style.display = 'grid';
