@@ -1771,6 +1771,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     </button>
                 </div>
 
+                <!-- Language Specific Contextual Search Bar -->
+                <div class="lang-search-box-container">
+                    <div class="lang-search-wrapper">
+                        <i class="fas fa-search lang-search-icon"></i>
+                        <input type="text" class="lang-search-input-field" placeholder="Search within ${lang.name} music...">
+                    </div>
+                </div>
+
+                <!-- Contextual Search Results Section -->
+                <div class="lang-search-results-section" style="display: none; margin-bottom: 28px;">
+                    <h3 class="browse-section-title">
+                        <i class="fas fa-search" style="color:var(--primary); margin-right:8px;"></i>Search Results in ${lang.name}
+                    </h3>
+                    <div class="card-grid lang-search-results-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px;"></div>
+                </div>
+
                 <div class="lang-mood-chips-row">
                     ${moodChips}
                 </div>
@@ -1802,6 +1818,14 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
+        // Initialize language contextual search functionality
+        let langSearchTimeout = null;
+        const searchInput = cardGrid.querySelector('.lang-search-input-field');
+        const resultsSection = cardGrid.querySelector('.lang-search-results-section');
+        const resultsGrid = cardGrid.querySelector('.lang-search-results-grid');
+        const moodChipsRow = cardGrid.querySelector('.lang-mood-chips-row');
+        const moodRowsContainer = cardGrid.querySelector('.lang-mood-rows');
+
         // Resolve healthy API host once
         let apiHost = 'https://discoveryprovider.audius.co';
         try {
@@ -1809,6 +1833,82 @@ document.addEventListener('DOMContentLoaded', () => {
             const hostData = await hostRes.json();
             if (hostData?.data?.length > 0) apiHost = hostData.data[0];
         } catch(_) {}
+
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                const query = e.target.value.trim();
+                clearTimeout(langSearchTimeout);
+
+                if (query.length === 0) {
+                    // Show standard sections
+                    resultsSection.style.display = 'none';
+                    moodChipsRow.style.display = 'flex';
+                    moodRowsContainer.style.display = 'block';
+                    return;
+                }
+
+                // Hide standard sections, show search results
+                resultsSection.style.display = 'block';
+                moodChipsRow.style.display = 'none';
+                moodRowsContainer.style.display = 'none';
+
+                resultsGrid.innerHTML = '<div style="padding:20px; color:var(--text-subdued);"><i class="fas fa-spinner fa-spin"></i> Searching inside ' + lang.name + '...</div>';
+
+                langSearchTimeout = setTimeout(async () => {
+                    try {
+                        const fullQuery = `${lang.name} ${query}`;
+                        const res = await fetch(
+                            `${apiHost}/v1/tracks/search?query=${encodeURIComponent(fullQuery)}&limit=20&app_name=PalmPlay`,
+                            { signal: AbortSignal.timeout(8000) }
+                        );
+                        const data = await res.json();
+                        const tracks = data.data || [];
+
+                        if (tracks.length === 0) {
+                            resultsGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found.</p>';
+                            return;
+                        }
+
+                        // Create temporary playlist for search results
+                        const plId = `lang_search_${lang.name}`;
+                        let plIdx = playlists.findIndex(p => p.id === plId);
+                        if (plIdx === -1) {
+                            plIdx = playlists.length;
+                            playlists.push({ id: plId, name: `${lang.name} Search Results`, tracks: [], isTemporary: true });
+                        }
+
+                        const mapped = tracks.map(t => ({
+                            id: t.id, name: t.title, artist: t.user?.name || 'Unknown',
+                            album: t.genre || 'Search', duration: t.duration,
+                            plays: t.play_count || 0,
+                            url: `${apiHost}/v1/tracks/${t.id}/stream?app_name=PalmPlay`,
+                            art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop',
+                            isAudius: true
+                        }));
+                        playlists[plIdx].tracks = mapped;
+
+                        resultsGrid.innerHTML = '';
+                        mapped.forEach((track, tIdx) => {
+                            const card = document.createElement('div');
+                            card.className = 'card';
+                            const playsLabel = track.plays > 0 ? `${(track.plays / 1000).toFixed(0)}K` : '';
+                            card.innerHTML = `
+                                <div class="card-image" style="background-image: url(${track.art})">
+                                    <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+                                    ${playsLabel ? `<span class="plays-badge"><i class="fas fa-headphones" style="margin-right:4px"></i>${playsLabel}</span>` : ''}
+                                </div>
+                                <div class="card-title">${track.name}</div>
+                                <div class="card-desc">${track.artist}</div>
+                            `;
+                            card.onclick = () => playTrack(plIdx, tIdx);
+                            resultsGrid.appendChild(card);
+                        });
+                    } catch (err) {
+                        resultsGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Error loading tracks.</p>';
+                    }
+                }, 500);
+            });
+        }
 
         // Fetch each mood row independently
         let allMoodTracks = [];
