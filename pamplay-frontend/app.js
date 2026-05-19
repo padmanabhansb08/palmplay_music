@@ -1360,18 +1360,74 @@ document.addEventListener('DOMContentLoaded', () => {
 
             audiusSearchTimeout = setTimeout(async () => {
                 try {
-                    const res = await fetch(`https://discoveryprovider.audius.co/v1/tracks/search?query=${encodeURIComponent(query)}&app_name=PalmPlay`);
+                    // Step 1: Get a healthy Audius discovery node from the official selector
+                    let apiHost = 'https://discoveryprovider.audius.co';
+                    try {
+                        const hostRes = await fetch('https://api.audius.co', { signal: AbortSignal.timeout(3000) });
+                        const hostData = await hostRes.json();
+                        if (hostData?.data?.length > 0) {
+                            apiHost = hostData.data[0];
+                        }
+                    } catch (_) { /* fall back to default host */ }
+
+                    // Step 2: Fetch with higher limit for better relevance filtering
+                    const res = await fetch(
+                        `${apiHost}/v1/tracks/search?query=${encodeURIComponent(query)}&limit=50&app_name=PalmPlay`,
+                        { signal: AbortSignal.timeout(8000) }
+                    );
                     const data = await res.json();
                     const audiusTracks = data.data || [];
                     
-                    audiusGrid.innerHTML = '';
-                    
                     if (audiusTracks.length === 0) {
-                        audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No external tracks found.</p>';
+                        audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found for "' + query + '".</p>';
                         return;
                     }
-                    
-                    // Update or create temporary Audius playlist
+
+                    // Step 3: Client-side relevance scoring
+                    const terms = lowQuery.split(/\s+/).filter(Boolean);
+
+                    function scoreTrack(t) {
+                        const title = (t.title || '').toLowerCase();
+                        const artist = (t.user?.name || '').toLowerCase();
+                        const genre = (t.genre || '').toLowerCase();
+                        let score = 0;
+
+                        for (const term of terms) {
+                            // Exact title match = highest priority
+                            if (title === lowQuery) score += 100;
+                            else if (title.startsWith(term)) score += 40;
+                            else if (title.includes(term)) score += 20;
+
+                            // Artist match
+                            if (artist === lowQuery) score += 60;
+                            else if (artist.startsWith(term)) score += 25;
+                            else if (artist.includes(term)) score += 12;
+
+                            // Genre match
+                            if (genre.includes(term)) score += 5;
+                        }
+
+                        // Popularity bonus (play count), max +10
+                        const plays = t.play_count || 0;
+                        score += Math.min(10, Math.floor(plays / 100000));
+
+                        return score;
+                    }
+
+                    // Filter out zero-relevance results and sort by score
+                    const scored = audiusTracks
+                        .map(t => ({ track: t, score: scoreTrack(t) }))
+                        .filter(item => item.score > 0)
+                        .sort((a, b) => b.score - a.score)
+                        .slice(0, 20) // Top 20 relevant results
+                        .map(item => item.track);
+
+                    if (scored.length === 0) {
+                        audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No matching tracks found for "' + query + '". Try different keywords.</p>';
+                        return;
+                    }
+
+                    // Step 4: Map to internal format and render
                     let audiusPlIndex = playlists.findIndex(pl => pl.id === 'audius_search');
                     if (audiusPlIndex === -1) {
                         audiusPlIndex = playlists.length;
@@ -1383,28 +1439,33 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                     }
                     
-                    const mappedTracks = audiusTracks.map(t => ({
+                    const mappedTracks = scored.map(t => ({
                         id: t.id,
                         name: t.title,
                         artist: t.user?.name || 'Unknown',
-                        album: 'Audius',
+                        album: t.genre || 'Audius',
                         duration: t.duration,
-                        url: `https://discoveryprovider.audius.co/v1/tracks/${t.id}/stream?app_name=PalmPlay`,
+                        plays: t.play_count || 0,
+                        url: `${apiHost}/v1/tracks/${t.id}/stream?app_name=PalmPlay`,
                         art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop',
                         isAudius: true
                     }));
                     
                     playlists[audiusPlIndex].tracks = mappedTracks;
-                    
+
+                    audiusGrid.innerHTML = '';
                     mappedTracks.forEach((track, tIdx) => {
                         const card = document.createElement('div');
                         card.className = 'card';
+                        const playsLabel = track.plays > 0
+                            ? `${(track.plays / 1000).toFixed(0)}K plays`
+                            : track.album;
                         card.innerHTML = `
                             <div class="card-image" style="background-image: url(${track.art})">
                                 <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
                             </div>
                             <div class="card-title">${track.name}</div>
-                            <div class="card-desc">${track.artist}</div>
+                            <div class="card-desc">${track.artist} · <span style="color:var(--primary)">${playsLabel}</span></div>
                         `;
                         card.onclick = () => playTrack(audiusPlIndex, tIdx);
                         audiusGrid.appendChild(card);
@@ -1412,9 +1473,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                 } catch (e) {
                     console.error("Audius API Error:", e);
-                    audiusGrid.innerHTML = '<p style="color:#ff4444; padding:20px;">Failed to fetch external tracks.</p>';
+                    audiusGrid.innerHTML = '<p style="color:#ff4444; padding:20px;"><i class="fas fa-exclamation-triangle"></i> Could not reach Audius. Check your connection.</p>';
                 }
-            }, 600);
+            }, 800);
         }
     }
 
