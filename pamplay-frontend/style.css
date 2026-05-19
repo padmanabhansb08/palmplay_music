@@ -1254,3 +1254,168 @@ body {
 .premium-search-input::placeholder {
     color: rgba(255, 255, 255, 0.4);
 }
+
+/* ─── Search Discovery Hub ──────────────────────────────────────────────────── */
+.search-discovery-hub {
+    animation: hubFadeIn 0.5s ease;
+}
+
+@keyframes hubFadeIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Hero Section with Visualizer */
+.search-hero-section {
+    position: relative;
+    border-radius: var(--border-radius-lg);
+    overflow: hidden;
+    padding: 40px 32px;
+    margin-bottom: 28px;
+    background: linear-gradient(135deg, rgba(255,0,0,0.08) 0%, rgba(40,0,80,0.12) 50%, rgba(0,40,80,0.08) 100%);
+    border: 1px solid rgba(255,255,255,0.06);
+}
+
+.search-hero-visual {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.search-hero-visual canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.search-hero-text {
+    position: relative;
+    z-index: 1;
+}
+
+.search-hero-text h2 {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #fff 60%, var(--primary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.search-hero-text p {
+    color: var(--text-subdued);
+    font-size: 15px;
+    max-width: 500px;
+}
+
+/* Quick Search Chips Row */
+.quick-chips-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+    padding: 0 4px;
+}
+
+.quick-chip {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 500px;
+    padding: 6px 14px;
+    color: var(--text-subdued);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    font-family: 'Outfit', sans-serif;
+    white-space: nowrap;
+}
+
+.quick-chip:hover {
+    background: var(--primary);
+    color: white;
+    border-color: var(--primary);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255,0,0,0.3);
+}
+
+/* Browse Section Title */
+.browse-section-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: white;
+    margin-bottom: 16px;
+    padding: 0 4px;
+    letter-spacing: -0.3px;
+}
+
+/* Genre Browse Grid */
+.genre-browse-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.genre-browse-card {
+    position: relative;
+    border-radius: var(--border-radius-md);
+    padding: 24px 20px;
+    cursor: pointer;
+    overflow: hidden;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    min-height: 100px;
+    display: flex;
+    align-items: flex-end;
+}
+
+.genre-browse-card:hover {
+    transform: translateY(-4px) scale(1.02);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+}
+
+.genre-card-icon {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    font-size: 40px;
+    opacity: 0.2;
+    transform: rotate(15deg);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.genre-browse-card:hover .genre-card-icon {
+    transform: rotate(0deg) scale(1.1);
+    opacity: 0.35;
+}
+
+.genre-card-label {
+    font-size: 16px;
+    font-weight: 700;
+    color: white;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    position: relative;
+    z-index: 1;
+}
+
+/* Trending Grid */
+.trending-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 24px;
+}
+
+/* Plays Badge */
+.plays-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(6px);
+    border-radius: 500px;
+    padding: 3px 8px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.8);
+    display: flex;
+    align-items: center;
+}

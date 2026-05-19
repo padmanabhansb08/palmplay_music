@@ -1451,7 +1451,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (categoryChips) categoryChips.style.display = 'none';
         sectionTitleEl.textContent = 'Browse All Tracks';
         cardGrid.innerHTML = '';
-        cardGrid.style.display = 'grid';
+        cardGrid.style.display = 'block';
 
         // Flatten all tracks for search, maintaining original playlist indexes
         const allTracks = [];
@@ -1463,6 +1463,77 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        // ─── Interactive Discovery Hub ─────────────────────────────────────────
+        const hub = document.createElement('div');
+        hub.className = 'search-discovery-hub';
+
+        // Quick search suggestion chips
+        const quickSearches = ['Lofi Beats', 'Hip Hop', 'Chill Vibes', 'Electronic', 'R&B Soul', 'Indie', 'Jazz', 'Ambient', 'Rock', 'Acoustic'];
+        const chipsHtml = quickSearches.map(q =>
+            `<button class="quick-chip" onclick="document.querySelector('.premium-search-input').value='${q}'; document.querySelector('.premium-search-input').dispatchEvent(new Event('input'));">
+                <i class="fas fa-search" style="margin-right:6px; font-size:10px; opacity:0.6"></i>${q}
+            </button>`
+        ).join('');
+
+        // Genre browse cards with unique gradients
+        const genres = [
+            { name: 'Electronic', icon: 'fa-bolt',       grad: 'linear-gradient(135deg, #8B5CF6, #6366F1)' },
+            { name: 'Hip-Hop',    icon: 'fa-microphone', grad: 'linear-gradient(135deg, #F97316, #EF4444)' },
+            { name: 'Pop',        icon: 'fa-star',       grad: 'linear-gradient(135deg, #EC4899, #F43F5E)' },
+            { name: 'Lo-Fi',      icon: 'fa-cloud-moon', grad: 'linear-gradient(135deg, #06B6D4, #3B82F6)' },
+            { name: 'Jazz',       icon: 'fa-guitar',     grad: 'linear-gradient(135deg, #D97706, #B45309)' },
+            { name: 'Ambient',    icon: 'fa-leaf',       grad: 'linear-gradient(135deg, #10B981, #059669)' },
+            { name: 'Rock',       icon: 'fa-fire',       grad: 'linear-gradient(135deg, #DC2626, #991B1B)' },
+            { name: 'R&B',        icon: 'fa-heart',      grad: 'linear-gradient(135deg, #7C3AED, #4C1D95)' },
+        ];
+        const genreCards = genres.map(g =>
+            `<div class="genre-browse-card" style="background: ${g.grad}" onclick="document.querySelector('.premium-search-input').value='${g.name}'; document.querySelector('.premium-search-input').dispatchEvent(new Event('input'));">
+                <i class="fas ${g.icon} genre-card-icon"></i>
+                <span class="genre-card-label">${g.name}</span>
+            </div>`
+        ).join('');
+
+        hub.innerHTML = `
+            <div class="search-hero-section">
+                <div class="search-hero-visual">
+                    <canvas id="search-visualizer" width="600" height="200"></canvas>
+                </div>
+                <div class="search-hero-text">
+                    <h2>Discover Something New</h2>
+                    <p>Search across millions of tracks on the Audius decentralized network</p>
+                </div>
+            </div>
+
+            <div class="quick-chips-row">
+                <span style="color:var(--text-subdued); font-size:13px; margin-right:8px; white-space:nowrap;">Try:</span>
+                ${chipsHtml}
+            </div>
+
+            <h3 class="browse-section-title">Browse by Genre</h3>
+            <div class="genre-browse-grid">
+                ${genreCards}
+            </div>
+
+            <h3 class="browse-section-title" style="margin-top:32px;">
+                <i class="fas fa-fire" style="color:var(--primary); margin-right:8px;"></i>Trending Right Now
+            </h3>
+            <div class="card-grid trending-grid" id="search-trending-grid" style="display:grid;">
+                <div style="grid-column: 1/-1; text-align:center; padding:30px; color:var(--text-subdued);">
+                    <i class="fas fa-spinner fa-spin" style="font-size:20px;"></i>
+                    <p style="margin-top:8px;">Loading trending tracks...</p>
+                </div>
+            </div>
+        `;
+        cardGrid.appendChild(hub);
+
+        // Local tracks below (hidden by default, shown on search)
+        const localSection = document.createElement('div');
+        localSection.id = 'local-search-results';
+        localSection.style.display = 'none';
+        localSection.innerHTML = '<h3 class="browse-section-title">Your Library</h3>';
+        const localGrid = document.createElement('div');
+        localGrid.className = 'card-grid';
+        localGrid.style.display = 'grid';
         allTracks.forEach(track => {
             const card = document.createElement('div');
             card.className = 'card local-card';
@@ -1474,26 +1545,146 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="card-desc">${track.artist}</div>
             `;
             card.onclick = () => playTrack(track.plIdx, track.tIdx);
-            cardGrid.appendChild(card);
+            localGrid.appendChild(card);
         });
+        localSection.appendChild(localGrid);
+        cardGrid.appendChild(localSection);
 
-        // Add container for audius results
+        // Add container for audius search results
         const audiusContainer = document.createElement('div');
         audiusContainer.id = 'audius-results';
-        audiusContainer.style.gridColumn = '1 / -1';
         audiusContainer.style.marginTop = '20px';
-        audiusContainer.innerHTML = '<h3 style="color:var(--primary); margin-bottom: 16px;">External Results</h3><div class="card-grid" id="audius-card-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px;"></div>';
+        audiusContainer.innerHTML = '<h3 class="browse-section-title" style="color:var(--primary);">Search Results</h3><div class="card-grid" id="audius-card-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px;"></div>';
         audiusContainer.style.display = 'none';
         cardGrid.appendChild(audiusContainer);
 
-        if (allTracks.length === 0) {
-            const emptyMsg = document.createElement('p');
-            emptyMsg.className = 'empty-search-msg';
-            emptyMsg.style.color = 'var(--text-subdued)';
-            emptyMsg.style.padding = '20px';
-            emptyMsg.innerHTML = 'Search to explore millions of external tracks, or add folders to search your local music!';
-            cardGrid.appendChild(emptyMsg);
+        // ─── Interactive Visualizer Canvas ──────────────────────────────────────
+        const canvas = document.getElementById('search-visualizer');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            const particles = [];
+            const PARTICLE_COUNT = 60;
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                particles.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    radius: Math.random() * 3 + 1,
+                    speedX: (Math.random() - 0.5) * 0.8,
+                    speedY: (Math.random() - 0.5) * 0.8,
+                    opacity: Math.random() * 0.5 + 0.2,
+                    hue: Math.random() * 40 - 10 // red-ish range
+                });
+            }
+
+            let animFrame;
+            function drawVisualizer() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Draw connecting lines between nearby particles
+                for (let i = 0; i < particles.length; i++) {
+                    for (let j = i + 1; j < particles.length; j++) {
+                        const dx = particles[i].x - particles[j].x;
+                        const dy = particles[i].y - particles[j].y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < 100) {
+                            ctx.beginPath();
+                            ctx.strokeStyle = `rgba(255, 60, 60, ${0.15 * (1 - dist / 100)})`;
+                            ctx.lineWidth = 0.5;
+                            ctx.moveTo(particles[i].x, particles[i].y);
+                            ctx.lineTo(particles[j].x, particles[j].y);
+                            ctx.stroke();
+                        }
+                    }
+                }
+
+                // Draw and move particles
+                particles.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsla(${p.hue}, 80%, 60%, ${p.opacity})`;
+                    ctx.fill();
+
+                    p.x += p.speedX;
+                    p.y += p.speedY;
+
+                    // Bounce off edges
+                    if (p.x < 0 || p.x > canvas.width) p.speedX *= -1;
+                    if (p.y < 0 || p.y > canvas.height) p.speedY *= -1;
+                });
+
+                animFrame = requestAnimationFrame(drawVisualizer);
+            }
+            drawVisualizer();
+
+            // Clean up when leaving search view
+            const observer = new MutationObserver(() => {
+                if (!document.getElementById('search-visualizer')) {
+                    cancelAnimationFrame(animFrame);
+                    observer.disconnect();
+                }
+            });
+            observer.observe(cardGrid, { childList: true });
         }
+
+        // ─── Auto-load Trending Tracks ──────────────────────────────────────────
+        (async () => {
+            const trendGrid = document.getElementById('search-trending-grid');
+            if (!trendGrid) return;
+            try {
+                let apiHost = 'https://discoveryprovider.audius.co';
+                try {
+                    const hostRes = await fetch('https://api.audius.co', { signal: AbortSignal.timeout(3000) });
+                    const hostData = await hostRes.json();
+                    if (hostData?.data?.length > 0) apiHost = hostData.data[0];
+                } catch(_) {}
+
+                const res = await fetch(`${apiHost}/v1/tracks/trending?app_name=PalmPlay&limit=12`, { signal: AbortSignal.timeout(8000) });
+                const data = await res.json();
+                const tracks = data.data || [];
+
+                if (tracks.length === 0) {
+                    trendGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Could not load trending.</p>';
+                    return;
+                }
+
+                let trendPlIndex = playlists.findIndex(pl => pl.id === 'audius_trending_search');
+                if (trendPlIndex === -1) {
+                    trendPlIndex = playlists.length;
+                    playlists.push({ id: 'audius_trending_search', name: 'Trending', tracks: [], isTemporary: true });
+                }
+
+                const mapped = tracks.map(t => ({
+                    id: t.id, name: t.title, artist: t.user?.name || 'Unknown',
+                    album: t.genre || 'Audius', duration: t.duration,
+                    plays: t.play_count || 0,
+                    url: `${apiHost}/v1/tracks/${t.id}/stream?app_name=PalmPlay`,
+                    art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop',
+                    isAudius: true
+                }));
+                playlists[trendPlIndex].tracks = mapped;
+
+                trendGrid.innerHTML = '';
+                mapped.forEach((track, tIdx) => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    const playsLabel = track.plays > 0 ? `${(track.plays / 1000).toFixed(0)}K` : '';
+                    card.innerHTML = `
+                        <div class="card-image" style="background-image: url(${track.art})">
+                            <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+                            ${playsLabel ? `<span class="plays-badge"><i class="fas fa-headphones" style="margin-right:4px"></i>${playsLabel}</span>` : ''}
+                        </div>
+                        <div class="card-title">${track.name}</div>
+                        <div class="card-desc">${track.artist}</div>
+                    `;
+                    card.onclick = () => playTrack(trendPlIndex, tIdx);
+                    trendGrid.appendChild(card);
+                });
+            } catch(e) {
+                trendGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Couldn\'t load trending tracks.</p>';
+            }
+        })();
+        // ────────────────────────────────────────────────────────────────────────
     }
 
     async function filterCards(query) {
@@ -1501,6 +1692,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // This logic depends on whether we are in search view or home view
         if (state.currentView === 'search') {
+            // Toggle discovery hub vs search results
+            const hub = cardGrid.querySelector('.search-discovery-hub');
+            const localSection = document.getElementById('local-search-results');
+
+            if (query.trim().length > 0) {
+                // Searching: hide hub, show local + audius
+                if (hub) hub.style.display = 'none';
+                if (localSection) localSection.style.display = 'block';
+            } else {
+                // Empty: show hub, hide results
+                if (hub) hub.style.display = 'block';
+                if (localSection) localSection.style.display = 'none';
+            }
+
             const localCards = cardGrid.querySelectorAll('.local-card');
             const allTracks = [];
             playlists.forEach((pl, plIdx) => {
@@ -1513,15 +1718,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             localCards.forEach((card, index) => {
                 const track = allTracks[index];
+                if (!track) return;
                 const isMatch = track.name.toLowerCase().includes(lowQuery) ||
                     track.artist.toLowerCase().includes(lowQuery);
                 card.style.display = isMatch ? 'block' : 'none';
             });
-            
-            const emptyMsg = cardGrid.querySelector('.empty-search-msg');
-            if (emptyMsg) {
-                emptyMsg.style.display = localCards.length === 0 && !query ? 'block' : 'none';
-            }
 
             // Debounced Audius Fetch
             clearTimeout(audiusSearchTimeout);
