@@ -1858,14 +1858,123 @@ document.addEventListener('DOMContentLoaded', () => {
                     try {
                         const fullQuery = `${lang.name} ${query}`;
                         const res = await fetch(
-                            `${apiHost}/v1/tracks/search?query=${encodeURIComponent(fullQuery)}&limit=20&app_name=PalmPlay`,
+                            `${apiHost}/v1/tracks/search?query=${encodeURIComponent(fullQuery)}&limit=35&app_name=PalmPlay`,
                             { signal: AbortSignal.timeout(8000) }
                         );
                         const data = await res.json();
-                        const tracks = data.data || [];
+                        const rawTracks = data.data || [];
+
+                        // ─── STAGE 1: Client-Side Language Specific Scoring & Pruning ───
+                        const langNameLow = lang.name.toLowerCase();
+
+                        // Regional high-affinity keywords & key musicians/artists to identify language match
+                        const regionalKeywords = {
+                            'tamil': ['tamil', 'kollywood', 'indian', 'anirudh', 'ar rahman', 'vijay', 'ajith', 'raaja', 'yuvan', 'srinivas', 'spb', 'thangamey', 'oor', 'ilayaraja', 'harris jayaraj', 'melody', 'kuthu', 'mass', 'bgm', 'song'],
+                            'hindi': ['hindi', 'bollywood', 'indian', 'arijit', 'shreya', 'nehakakkar', 'kumarsanu', 'lata', 'rafi', 'kishore', 't-series', 'ustad', 'song', 'remix', 'lofi'],
+                            'telugu': ['telugu', 'tollywood', 'indian', 'dsp', 'thaman', 'sid sriram', 'spb', 'chitra', 'allu arjun', 'mahesh babu', 'keeravani', 'bahubali', 'song'],
+                            'kannada': ['kannada', 'sandalwood', 'indian', 'kfi', 'vijay prakash', 'rajkumar', 'sonu nigam', 'spb', 'sudeep', 'yash', 'song'],
+                            'malayalam': ['malayalam', 'mollywood', 'indian', 'yesudas', 'shreya ghoshal', 'gopi sundar', 'ks harisankar', 'vineeth', 'song'],
+                            'punjabi': ['punjabi', 'bhangra', 'indian', 'diljit', 'sidhu', 'ap dhillon', 'karan aujla', 'guru randhawa', 'amrit maan', 'song'],
+                            'korean': ['korean', 'kpop', 'k-pop', 'bts', 'blackpink', 'twice', 'exo', 'red velvet', 'iu', 'ost', 'kdrama', 'seoul', 'song'],
+                            'spanish': ['spanish', 'espanol', 'latin', 'reggaeton', 'bachata', 'salsa', 'mexican', 'colombian', 'daddy yankee', 'bad bunny', 'shakira', 'song'],
+                            'arabic': ['arabic', 'arab', 'egyptian', 'lebanese', 'amr diab', 'elissa', 'nancy ajram', 'tamer hosny', 'fairuz', 'song']
+                        };
+
+                        const scriptRegex = {
+                            'hindi': /[\u0900-\u097F]/, // Devanagari
+                            'tamil': /[\u0B80-\u0BFF]/, // Tamil
+                            'telugu': /[\u0C00-\u0C7F]/, // Telugu
+                            'kannada': /[\u0C80-\u0CFF]/, // Kannada
+                            'malayalam': /[\u0D00-\u0D7F]/, // Malayalam
+                            'punjabi': /[\u0A00-\u0A7F]/, // Gurmukhi
+                            'korean': /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/, // Hangul
+                            'arabic': /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/ // Arabic
+                        };
+
+                        const scoredTracks = rawTracks.map(t => {
+                            const title = (t.title || '').toLowerCase();
+                            const artist = (t.user?.name || '').toLowerCase();
+                            const genre = (t.genre || '').toLowerCase();
+                            const description = (t.description || '').toLowerCase();
+                            const tags = (t.tags || '').toLowerCase();
+
+                            let score = 0;
+
+                            // Title exact language name match
+                            if (title.includes(langNameLow)) score += 40;
+                            if (genre.includes(langNameLow)) score += 30;
+                            if (tags.includes(langNameLow)) score += 20;
+                            if (description.includes(langNameLow)) score += 15;
+                            if (artist.includes(langNameLow)) score += 10;
+
+                            // Unicode Native Script Match (Very Strong Proof)
+                            const regex = scriptRegex[langNameLow];
+                            if (regex && (regex.test(t.title) || regex.test(t.user?.name) || (t.description && regex.test(t.description)))) {
+                                score += 100;
+                            }
+
+                            // Regional Affinity Keyword Match
+                            const keywords = regionalKeywords[langNameLow];
+                            if (keywords) {
+                                keywords.forEach(kw => {
+                                    if (title.includes(kw)) score += 10;
+                                    if (artist.includes(kw)) score += 8;
+                                    if (genre.includes(kw)) score += 6;
+                                    if (tags.includes(kw)) score += 5;
+                                    if (description.includes(kw)) score += 3;
+                                });
+                            }
+
+                            // Substring word boundary protection:
+                            // Prevent "Oor" matching English "Door", "Floor", "Seafloor", "Poor", etc.
+                            // If the typed query is non-English, ensure we don't match English substrings
+                            if (langNameLow !== 'english' && query.length >= 3) {
+                                const qLow = query.toLowerCase();
+                                const hasExactInTitle = title.includes(qLow);
+                                const wordBoundary = new RegExp('\\b' + qLow + '\\b', 'i');
+                                const matchesBoundary = wordBoundary.test(title) || wordBoundary.test(tags) || wordBoundary.test(description);
+
+                                // If the word matches as a substring but NOT on a word boundary inside English-sounding titles
+                                if (hasExactInTitle && !matchesBoundary) {
+                                    // Check if title has many standard English words
+                                    const englishWords = ['door', 'floor', 'poor', 'room', 'moon', 'soon', 'cool', 'fool', 'book'];
+                                    let hasEnglishDistractor = false;
+                                    englishWords.forEach(w => {
+                                        if (title.includes(w)) hasEnglishDistractor = true;
+                                    });
+                                    if (hasEnglishDistractor) score -= 80; // heavy penalty
+                                }
+                            }
+
+                            // Protect English section from showing non-English scripts
+                            if (langNameLow === 'english') {
+                                let hasOtherScript = false;
+                                Object.keys(scriptRegex).forEach(k => {
+                                    if (scriptRegex[k].test(t.title)) hasOtherScript = true;
+                                });
+                                if (hasOtherScript) score -= 150;
+                                else score += 10; // baseline
+                            }
+
+                            return { track: t, score };
+                        });
+
+                        // Filter out negative/zero scores and sort by highest language-specific score
+                        let tracks = scoredTracks
+                            .filter(st => st.score > 0)
+                            .sort((a, b) => b.score - a.score)
+                            .map(st => st.track);
+
+                        // If strict filter yields absolutely nothing, fall back to loose matches but sort by score
+                        if (tracks.length === 0 && rawTracks.length > 0) {
+                            tracks = scoredTracks
+                                .sort((a, b) => b.score - a.score)
+                                .map(st => st.track)
+                                .slice(0, 10);
+                        }
 
                         if (tracks.length === 0) {
-                            resultsGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found.</p>';
+                            resultsGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No matching ' + lang.name + ' tracks found.</p>';
                             return;
                         }
 
