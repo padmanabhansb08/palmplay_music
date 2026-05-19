@@ -1475,16 +1475,32 @@ document.addEventListener('DOMContentLoaded', () => {
             </button>`
         ).join('');
 
-        // Genre browse cards with unique gradients
+        // Language browse cards with unique gradients and native script
+        const languages = [
+            { name: 'Hindi',      query: 'Hindi songs',      script: 'हि', grad: 'linear-gradient(135deg, #F97316, #DC2626)' },
+            { name: 'Tamil',      query: 'Tamil songs',      script: 'த',  grad: 'linear-gradient(135deg, #8B5CF6, #6366F1)' },
+            { name: 'Telugu',     query: 'Telugu songs',      script: 'తె', grad: 'linear-gradient(135deg, #EC4899, #BE185D)' },
+            { name: 'Kannada',    query: 'Kannada songs',     script: 'ಕ',  grad: 'linear-gradient(135deg, #10B981, #059669)' },
+            { name: 'Malayalam',  query: 'Malayalam songs',   script: 'മ',  grad: 'linear-gradient(135deg, #06B6D4, #0284C7)' },
+            { name: 'Punjabi',    query: 'Punjabi songs',     script: 'ਪੰ', grad: 'linear-gradient(135deg, #EAB308, #CA8A04)' },
+            { name: 'English',    query: 'English pop',       script: 'En', grad: 'linear-gradient(135deg, #3B82F6, #1D4ED8)' },
+            { name: 'Korean',     query: 'K-pop',             script: '한', grad: 'linear-gradient(135deg, #E879F9, #A855F7)' },
+            { name: 'Spanish',    query: 'Spanish Latin',     script: 'Es', grad: 'linear-gradient(135deg, #EF4444, #B91C1C)' },
+            { name: 'Arabic',     query: 'Arabic music',      script: 'عر', grad: 'linear-gradient(135deg, #D97706, #92400E)' },
+        ];
+        const langCards = languages.map(l =>
+            `<div class="genre-browse-card" style="background: ${l.grad}" onclick="document.querySelector('.premium-search-input').value='${l.query}'; document.querySelector('.premium-search-input').dispatchEvent(new Event('input'));">
+                <span class="lang-script-char">${l.script}</span>
+                <span class="genre-card-label">${l.name}</span>
+            </div>`
+        ).join('');
+
+        // Genre browse cards (secondary row)
         const genres = [
-            { name: 'Electronic', icon: 'fa-bolt',       grad: 'linear-gradient(135deg, #8B5CF6, #6366F1)' },
+            { name: 'Electronic', icon: 'fa-bolt',       grad: 'linear-gradient(135deg, #7C3AED, #4C1D95)' },
             { name: 'Hip-Hop',    icon: 'fa-microphone', grad: 'linear-gradient(135deg, #F97316, #EF4444)' },
-            { name: 'Pop',        icon: 'fa-star',       grad: 'linear-gradient(135deg, #EC4899, #F43F5E)' },
             { name: 'Lo-Fi',      icon: 'fa-cloud-moon', grad: 'linear-gradient(135deg, #06B6D4, #3B82F6)' },
-            { name: 'Jazz',       icon: 'fa-guitar',     grad: 'linear-gradient(135deg, #D97706, #B45309)' },
-            { name: 'Ambient',    icon: 'fa-leaf',       grad: 'linear-gradient(135deg, #10B981, #059669)' },
             { name: 'Rock',       icon: 'fa-fire',       grad: 'linear-gradient(135deg, #DC2626, #991B1B)' },
-            { name: 'R&B',        icon: 'fa-heart',      grad: 'linear-gradient(135deg, #7C3AED, #4C1D95)' },
         ];
         const genreCards = genres.map(g =>
             `<div class="genre-browse-card" style="background: ${g.grad}" onclick="document.querySelector('.premium-search-input').value='${g.name}'; document.querySelector('.premium-search-input').dispatchEvent(new Event('input'));">
@@ -1509,7 +1525,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${chipsHtml}
             </div>
 
-            <h3 class="browse-section-title">Browse by Genre</h3>
+            <h3 class="browse-section-title"><i class="fas fa-globe" style="color:var(--primary); margin-right:8px;"></i>Browse by Language</h3>
+            <div class="genre-browse-grid">
+                ${langCards}
+            </div>
+
+            <h3 class="browse-section-title" style="margin-top:24px;"><i class="fas fa-music" style="color:var(--primary); margin-right:8px;"></i>Browse by Genre</h3>
             <div class="genre-browse-grid">
                 ${genreCards}
             </div>

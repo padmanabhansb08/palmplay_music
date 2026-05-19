@@ -1419,3 +1419,22 @@ body {
     display: flex;
     align-items: center;
 }
+
+/* Language Script Character */
+.lang-script-char {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    font-size: 44px;
+    font-weight: 800;
+    opacity: 0.2;
+    color: white;
+    line-height: 1;
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.genre-browse-card:hover .lang-script-char {
+    transform: scale(1.15);
+    opacity: 0.35;
+}
