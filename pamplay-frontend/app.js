@@ -1436,34 +1436,58 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function decodeHtmlEntities(str) {
+        if (typeof str !== 'string' || !str) return str;
+        const txt = document.createElement('textarea');
+        txt.innerHTML = str;
+        return txt.value;
+    }
+
+    function pickSaavnUrl(arr) {
+        if (!Array.isArray(arr) || arr.length === 0) return '';
+        for (let i = arr.length - 1; i >= 0; i--) {
+            const item = arr[i];
+            if (!item) continue;
+            const u = item.url || item.link;
+            if (u) return u;
+        }
+        return '';
+    }
+
     async function fetchJioSaavnTracks(query, limit = 30) {
         try {
             const url = `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`;
             const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
             const data = await res.json();
-            if (data && data.success && data.data && data.data.results) {
-                return data.data.results.map(t => {
-                    const img = t.image && t.image.length > 0 
-                        ? (t.image[2]?.link || t.image[1]?.link || t.image[0]?.link) 
-                        : 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
-                    
-                    const streamUrl = t.downloadUrl && t.downloadUrl.length > 0 
-                        ? (t.downloadUrl[4]?.link || t.downloadUrl[3]?.link || t.downloadUrl[2]?.link || t.downloadUrl[1]?.link || t.downloadUrl[0]?.link) 
-                        : '';
-                    
-                    return {
-                        id: t.id,
-                        name: t.name,
-                        artist: t.primaryArtists || 'Various Artists',
-                        album: t.album?.name || 'JioSaavn',
-                        duration: parseInt(t.duration) || 200,
-                        plays: Math.floor(Math.random() * 50000) + 10000, // Mock high-quality regional plays count for premium feel
-                        url: streamUrl,
-                        art: img,
-                        isSaavn: true
-                    };
-                }).filter(t => t.url);
-            }
+            const results = data?.data?.results;
+            if (!Array.isArray(results) || results.length === 0) return [];
+
+            return results.map(t => {
+                const img = pickSaavnUrl(t.image) || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
+                const streamUrl = pickSaavnUrl(t.downloadUrl);
+
+                let artist = '';
+                if (Array.isArray(t.artists?.primary) && t.artists.primary.length > 0) {
+                    artist = t.artists.primary.map(a => a?.name).filter(Boolean).join(', ');
+                } else if (Array.isArray(t.artists?.all) && t.artists.all.length > 0) {
+                    artist = t.artists.all.map(a => a?.name).filter(Boolean).join(', ');
+                } else if (typeof t.primaryArtists === 'string') {
+                    artist = t.primaryArtists;
+                }
+
+                return {
+                    id: t.id,
+                    name: decodeHtmlEntities(t.name) || 'Unknown',
+                    artist: decodeHtmlEntities(artist) || 'Various Artists',
+                    album: decodeHtmlEntities(t.album?.name) || 'JioSaavn',
+                    duration: parseInt(t.duration) || 200,
+                    language: t.language || '',
+                    plays: Math.floor(Math.random() * 50000) + 10000,
+                    url: streamUrl,
+                    art: img,
+                    isSaavn: true
+                };
+            }).filter(t => t.url);
         } catch (e) {
             console.error("JioSaavn API Fetch Error:", e);
         }
