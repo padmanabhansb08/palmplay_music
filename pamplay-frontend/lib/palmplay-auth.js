@@ -45,6 +45,20 @@
         window.dispatchEvent(new CustomEvent('palmplay:authchange', { detail: null }));
     }
 
+    /** Where email confirm / magic links should land (not localhost). */
+    function getEmailRedirectUrl() {
+        if (window.PalmPlayRoutes?.page) {
+            return window.PalmPlayRoutes.page('home');
+        }
+        const origin = window.location.origin;
+        const p = window.location.pathname;
+        if (p === '/app' || p.startsWith('/app/')) return `${origin}/app`;
+        if (p.includes('/pamplay-frontend')) {
+            return `${origin}${p.substring(0, p.indexOf('/pamplay-frontend') + 16)}home.html`;
+        }
+        return `${origin}/app`;
+    }
+
     async function init() {
         if (initPromise) return initPromise;
         initPromise = (async () => {
@@ -97,7 +111,8 @@
         if (!client) await init();
         if (!client) throw new Error('Supabase is not configured');
         const options = {
-            data: { display_name: displayName || email.split('@')[0] }
+            data: { display_name: displayName || email.split('@')[0] },
+            emailRedirectTo: getEmailRedirectUrl()
         };
         if (captchaToken) options.captchaToken = captchaToken;
         const { data, error } = await client.auth.signUp({

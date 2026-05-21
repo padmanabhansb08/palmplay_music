@@ -6,7 +6,12 @@ PalmPlay uses Supabase for **real sign-in** and syncing **playlists** and **like
 
 1. Go to [supabase.com](https://supabase.com) → New project.
 2. **Authentication → Providers → Email**: enable Email; for quick testing you can disable “Confirm email”.
-3. **SQL Editor**: paste and run `supabase/schema.sql` from this repo.
+3. **Authentication → URL configuration** (fixes confirm email opening `localhost`):
+   - **Site URL:** `https://palmplay-music.vercel.app/app`
+   - **Redirect URLs** (add each line):
+     - `https://palmplay-music.vercel.app/**`
+     - `http://localhost:**` (only if you test locally)
+4. **SQL Editor**: paste and run `supabase/schema.sql` from this repo.
 
 ## 2. Environment variables
 
@@ -25,7 +30,13 @@ npm run config
 
 This writes gitignored `pamplay-frontend/supabase-config.js` (loaded by the app).
 
-## 3. Captcha (Turnstile) — fix `sitekey-secret-mismatch`
+## 3. Email confirm went to localhost?
+
+Supabase uses **Site URL** for links in confirmation emails. If it says `http://localhost:3000`, update **Authentication → URL configuration** as in step 3 above, then sign up again (or resend confirmation from Supabase **Authentication → Users**).
+
+PalmPlay also sends `emailRedirectTo` on sign-up so new emails point at `/app` on your current domain.
+
+## 4. Captcha (Turnstile) — fix `sitekey-secret-mismatch`
 
 If Supabase shows **“captcha protection: request disallowed (sitekey-secret-mismatch)”**, the **Site Key** and **Secret Key** in your project do not belong to the same Cloudflare Turnstile widget.
 
@@ -54,11 +65,11 @@ The login/signup pages show the Turnstile widget when `TURNSTILE_SITE_KEY` is se
 
 **Common mistake:** putting the Site Key into Supabase’s secret field, or mixing keys from two different Turnstile sites.
 
-## 4. Deploy
+## 5. Deploy
 
 Push to `main`; Vercel runs `npm run build`, which regenerates config from env vars.
 
-## 5. Verify
+## 6. Verify
 
 1. Open `/app/signup` → complete captcha (if shown) → create an account.
 2. Log in on another browser/device with the same account.
