@@ -692,6 +692,71 @@ body.player-expanded .player-bar {
     margin-bottom: 16px;
 }
 
+/* ─── Trust & polish (Gap 8) ─── */
+.offline-banner {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1200;
+    padding: 10px 16px;
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
+    background: rgba(180, 40, 40, 0.95);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.offline-banner.visible {
+    display: flex;
+}
+
+.offline-banner i {
+    opacity: 0.9;
+}
+
+.recent-searches-block {
+    margin: 16px 0 24px;
+}
+
+.recent-searches-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-subdued);
+    margin-bottom: 10px;
+}
+
+.recent-searches-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.recent-search-chip {
+    padding: 8px 14px;
+    border-radius: 500px;
+    border: 1px solid var(--glass-border);
+    background: var(--bg-highlight);
+    color: var(--text-base);
+    font-size: 13px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.recent-search-chip:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 0, 0, 0.35);
+}
+
 .state-message .retry-btn {
     margin-top: 16px;
 }

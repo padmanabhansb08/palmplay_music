@@ -532,11 +532,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function init() {
+        setupConnectivityBanner();
         setupEventListeners();
         setupKeyboardShortcuts();
         await loadFromDatabase();
         updatePlayerUI();
         routeInitialView();
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('q') && ppRoutes().isExplorePage()) {
+            const q = decodeURIComponent(params.get('q'));
+            window.PalmPlayNav?.go('search', true);
+            const input = document.querySelector('.premium-search-input');
+            if (input) {
+                input.value = q;
+                setTimeout(() => filterCards(q), 300);
+            }
+            history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+        } else {
+            await handlePlaybackDeepLink();
+        }
     }
 
     async function loadFromDatabase() {
@@ -924,8 +938,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Auxiliary Premium Toasts
-        const auxButtonsSelector = ['.fa-microphone', '.fa-list', '.fa-desktop'];
+        document.getElementById('share-track-btn')?.addEventListener('click', () => shareCurrentTrack());
+
+        const auxButtonsSelector = ['.fa-microphone', '.fa-desktop'];
         auxButtonsSelector.forEach(selector => {
             const btn = document.querySelector(selector);
             if (btn) {
@@ -1131,11 +1146,276 @@ document.addEventListener('DOMContentLoaded', () => {
     const HOME_FEED_TTL_MS = 5 * 60 * 1000;
     const PLAY_HISTORY_KEY = 'palmplay_play_history';
     const PLAY_HISTORY_MAX = 50;
+    const RECENT_SEARCHES_KEY = 'palmplay_recent_searches';
+    const RECENT_SEARCHES_MAX = 15;
+    let playbackRecoveryLock = false;
 
     function escapeHtml(str) {
         const d = document.createElement('div');
         d.textContent = str == null ? '' : String(str);
         return d.innerHTML;
+    }
+
+    function showErrorState(container, { icon = 'fa-exclamation-triangle', title, message, onRetry }) {
+        if (!container) return;
+        const el = document.createElement('div');
+        el.className = 'state-message';
+        el.style.gridColumn = '1 / -1';
+        el.innerHTML = `
+            <i class="fas ${icon}"></i>
+            <p><strong>${escapeHtml(title)}</strong><br>${escapeHtml(message)}</p>
+        `;
+        if (onRetry) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'upgrade-btn retry-btn';
+            btn.textContent = 'Retry';
+            btn.onclick = onRetry;
+            el.appendChild(btn);
+        }
+        container.innerHTML = '';
+        container.appendChild(el);
+    }
+
+    function getRecentSearches() {
+        try {
+            const raw = localStorage.getItem(RECENT_SEARCHES_KEY);
+            const list = raw ? JSON.parse(raw) : [];
+            return Array.isArray(list) ? list.filter(q => typeof q === 'string' && q.trim()) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function addRecentSearch(query) {
+        const q = (query || '').trim();
+        if (q.length < 2) return;
+        let list = getRecentSearches().filter(item => item.toLowerCase() !== q.toLowerCase());
+        list.unshift(q);
+        list = list.slice(0, RECENT_SEARCHES_MAX);
+        localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(list));
+    }
+
+    function renderRecentSearchesHtml() {
+        const recent = getRecentSearches();
+        if (!recent.length) return '';
+        const chips = recent.map(q =>
+            `<button type="button" class="recent-search-chip" data-recent-q="${escapeHtml(q)}">${escapeHtml(q)}</button>`
+        ).join('');
+        return `
+            <div class="recent-searches-block">
+                <span class="recent-searches-label">Recent</span>
+                <div class="recent-searches-row">${chips}</div>
+            </div>
+        `;
+    }
+
+    function bindRecentSearchChips(root) {
+        root?.querySelectorAll('.recent-search-chip').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const q = btn.getAttribute('data-recent-q') || '';
+                const input = document.querySelector('.premium-search-input');
+                if (input) {
+                    input.value = q;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            });
+        });
+    }
+
+    function setupConnectivityBanner() {
+        if (document.getElementById('palmplay-offline-banner')) return;
+        const bar = document.createElement('div');
+        bar.id = 'palmplay-offline-banner';
+        bar.className = 'offline-banner';
+        bar.setAttribute('role', 'status');
+        bar.innerHTML = '<i class="fas fa-wifi"></i><span>You\'re offline — streaming may not work. Local files still play.</span>';
+        document.body.prepend(bar);
+        const update = () => bar.classList.toggle('visible', !navigator.onLine);
+        window.addEventListener('online', update);
+        window.addEventListener('offline', update);
+        update();
+    }
+
+    function parseCatalogSong(t) {
+        if (!t) return null;
+        const img = pickMediaUrl(t.image) || DEFAULT_ART_URL;
+        const streamUrl = pickMediaUrl(t.downloadUrl);
+        if (!streamUrl) return null;
+
+        let artist = '';
+        if (Array.isArray(t.artists?.primary) && t.artists.primary.length > 0) {
+            artist = t.artists.primary.map(a => a?.name).filter(Boolean).join(', ');
+        } else if (Array.isArray(t.artists?.all) && t.artists.all.length > 0) {
+            artist = t.artists.all.map(a => a?.name).filter(Boolean).join(', ');
+        } else if (typeof t.primaryArtists === 'string') {
+            artist = t.primaryArtists;
+        }
+
+        return {
+            id: t.id,
+            name: decodeHtmlEntities(t.name) || 'Unknown',
+            artist: decodeHtmlEntities(artist) || 'Various Artists',
+            album: decodeHtmlEntities(t.album?.name) || 'Single',
+            duration: parseInt(t.duration, 10) || 200,
+            url: streamUrl,
+            art: img,
+            isCatalog: true
+        };
+    }
+
+    async function fetchCatalogSongById(id) {
+        if (!MUSIC_CATALOG_API_BASE || !id) return null;
+        catalogTraffic.recordStart();
+        try {
+            const res = await fetch(`${MUSIC_CATALOG_API_BASE}/songs/${encodeURIComponent(id)}`, {
+                signal: AbortSignal.timeout(8000)
+            });
+            const data = await res.json();
+            const raw = data?.data;
+            const item = Array.isArray(raw) ? raw[0] : raw;
+            return parseCatalogSong(item);
+        } catch (e) {
+            console.warn('fetchCatalogSongById failed', e);
+            return null;
+        } finally {
+            catalogTraffic.recordEnd();
+        }
+    }
+
+    async function resolveTrackStream(track, forceRefresh = false) {
+        if (!track) return null;
+        if (!forceRefresh && track.url && !track._unplayable) return track.url;
+
+        if (track.isCatalog && track.id) {
+            const fresh = await fetchCatalogSongById(track.id);
+            if (fresh?.url) return fresh.url;
+        }
+
+        if ((track.isAudius || track.isCatalogFallback) && track.id) {
+            return `${AUDIUS_HOST}/v1/tracks/${track.id}/stream?app_name=${AUDIUS_APP_NAME}`;
+        }
+
+        const results = await fetchCatalogTracks(`${track.name} ${track.artist}`, 6);
+        const match = results.find(r =>
+            r.name?.toLowerCase() === track.name?.toLowerCase() &&
+            r.artist?.toLowerCase() === track.artist?.toLowerCase()
+        ) || results[0];
+        return match?.url || null;
+    }
+
+    function markTrackUnplayable(plIndex, tIndex) {
+        const t = playlists[plIndex]?.tracks?.[tIndex];
+        if (t) t._unplayable = true;
+    }
+
+    function onPlaybackFailed(track, plIndex, tIndex) {
+        markTrackUnplayable(plIndex, tIndex);
+        showToast(`Can't play "${track.name}" — try another track`, 'fa-exclamation-triangle');
+        state.isPlaying = false;
+        updatePlayerUI();
+    }
+
+    function buildTrackShareUrl(track) {
+        const appBase = `${location.origin}${ppRoutes().page('home')}`;
+        if (track?.id && track.isCatalog) {
+            return `${appBase}?play=${encodeURIComponent(track.id)}`;
+        }
+        const q = `${track?.name || ''} ${track?.artist || ''}`.trim();
+        return `${appBase}?q=${encodeURIComponent(q)}`;
+    }
+
+    async function shareCurrentTrack() {
+        if (state.currentPlaylistIndex < 0) {
+            showToast('Play a song first to share', 'fa-share-alt');
+            return;
+        }
+        const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+        if (!track) return;
+
+        const url = buildTrackShareUrl(track);
+        const title = `${track.name} — ${track.artist}`;
+        const text = `Listen on PalmPlay`;
+
+        if (navigator.share) {
+            try {
+                await navigator.share({ title, text, url });
+                return;
+            } catch (e) {
+                if (e?.name === 'AbortError') return;
+            }
+        }
+
+        try {
+            await navigator.clipboard.writeText(url);
+            showToast('Link copied to clipboard', 'fa-link');
+        } catch {
+            showToast(url, 'fa-link');
+        }
+    }
+
+    window.shareCurrentTrack = shareCurrentTrack;
+
+    async function handlePlaybackDeepLink() {
+        const params = new URLSearchParams(window.location.search);
+        const playId = params.get('play');
+        const q = params.get('q');
+        if (!playId && !q) return;
+
+        if (playId) {
+            let track = await fetchCatalogSongById(playId);
+            if (!track) {
+                const audius = await fetchAudiusCatalogFallback(playId, 1);
+                track = audius[0] || null;
+            }
+            if (track) {
+                const idx = upsertTempPlaylist('deeplink', 'Shared track', [track]);
+                await playTrack(idx, 0);
+            } else {
+                showToast('Could not open shared track', 'fa-link-slash');
+            }
+        } else if (q) {
+            const decoded = decodeURIComponent(q);
+            if (!ppRoutes().isExplorePage()) {
+                window.location.href = `${ppRoutes().page('discover')}?q=${encodeURIComponent(decoded)}`;
+                return;
+            }
+            window.PalmPlayNav?.go('search');
+            const input = document.querySelector('.premium-search-input');
+            if (input) {
+                input.value = decoded;
+                filterCards(decoded);
+            }
+        }
+
+        const clean = window.location.pathname + (window.location.hash || '');
+        history.replaceState(null, '', clean);
+    }
+
+    function waitForPlaybackReady(timeoutMs = 9000) {
+        return new Promise((resolve) => {
+            if (audio.readyState >= 2 && !audio.error) {
+                resolve(true);
+                return;
+            }
+            let settled = false;
+            const finish = (ok) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                audio.removeEventListener('playing', onPlaying);
+                audio.removeEventListener('canplay', onCanPlay);
+                audio.removeEventListener('error', onError);
+                resolve(ok);
+            };
+            const onPlaying = () => finish(true);
+            const onCanPlay = () => finish(true);
+            const onError = () => finish(false);
+            const timer = setTimeout(() => finish(!audio.error && audio.readyState >= 2), timeoutMs);
+            audio.addEventListener('playing', onPlaying, { once: true });
+            audio.addEventListener('canplay', onCanPlay, { once: true });
+            audio.addEventListener('error', onError, { once: true });
+        });
     }
 
     function getPlayHistory() {
@@ -1493,7 +1773,12 @@ document.addEventListener('DOMContentLoaded', () => {
             
         } catch (err) {
             console.error("Explore API Error:", err);
-            cardGrid.innerHTML = '<div class="state-message" style="grid-column:1/-1"><i class="fas fa-cloud-download-alt"></i><p>Could not load tracks. Try another category.</p><button class="upgrade-btn retry-btn" onclick="document.querySelector(\'.chip.active\')?.click()">Retry</button></div>';
+            showErrorState(cardGrid, {
+                icon: 'fa-cloud-download-alt',
+                title: 'Could not load tracks',
+                message: navigator.onLine ? 'The service may be busy. Try again or pick another category.' : 'You appear to be offline.',
+                onRetry: () => document.querySelector('.chip.active')?.click()
+            });
         }
     }
 
@@ -1622,13 +1907,26 @@ document.addEventListener('DOMContentLoaded', () => {
         mainView.scrollTop = 0;
     }
 
-    function playTrack(plIndex, tIndex) {
+    async function playTrack(plIndex, tIndex) {
+        if (playbackRecoveryLock) return;
         state.currentPlaylistIndex = plIndex;
         state.currentTrackIndex = tIndex;
-        const track = playlists[plIndex].tracks[tIndex];
+        let track = playlists[plIndex]?.tracks?.[tIndex];
+        if (!track) return;
 
-        // ── Crossfade Engine ────────────────────────────────────────────────────
-        // Resume AudioContext if suspended (browser policy)
+        let url = track.url;
+        if (!url || track._unplayable) {
+            url = await resolveTrackStream(track, true);
+        }
+        if (!url) {
+            onPlaybackFailed(track, plIndex, tIndex);
+            return;
+        }
+
+        playlists[plIndex].tracks[tIndex].url = url;
+        track = playlists[plIndex].tracks[tIndex];
+        delete track._unplayable;
+
         if (audioCtx.state === 'suspended') audioCtx.resume();
 
         const isFirstPlay = !audio.src;
@@ -1636,7 +1934,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const now = audioCtx.currentTime;
 
         if (!isFirstPlay && currentSource.gain) {
-            // Fade OUT current track
             currentSource.gain.gain.setValueAtTime(currentSource.gain.gain.value, now);
             currentSource.gain.gain.linearRampToValueAtTime(0, now + FADE);
             setTimeout(() => {
@@ -1648,8 +1945,7 @@ document.addEventListener('DOMContentLoaded', () => {
             audio.currentTime = 0;
         }
 
-        // Load new track and fade IN
-        audio.src = track.url;
+        audio.src = url;
         audio.playbackRate = state.playbackSpeed;
         if (!state.isMuted) {
             currentSource.gain.gain.setValueAtTime(isFirstPlay ? state.volume : 0, audioCtx.currentTime);
@@ -1657,26 +1953,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentSource.gain.gain.linearRampToValueAtTime(state.volume, audioCtx.currentTime + FADE);
             }
         }
-        audio.play().catch(e => console.warn('Play blocked:', e));
-        // ────────────────────────────────────────────────────────────────────────
+
+        try {
+            await audio.play();
+        } catch (e) {
+            console.warn('Play blocked:', e);
+        }
+
+        let ok = await waitForPlaybackReady(9000);
+        if (!ok) {
+            playbackRecoveryLock = true;
+            const retryUrl = await resolveTrackStream(track, true);
+            playbackRecoveryLock = false;
+            if (retryUrl && retryUrl !== url) {
+                playlists[plIndex].tracks[tIndex].url = retryUrl;
+                audio.src = retryUrl;
+                try {
+                    await audio.play();
+                    ok = await waitForPlaybackReady(8000);
+                } catch (e2) {
+                    console.warn('Retry play failed:', e2);
+                    ok = false;
+                }
+            }
+        }
+
+        if (!ok) {
+            onPlaybackFailed(track, plIndex, tIndex);
+            return;
+        }
 
         state.isPlaying = true;
         updatePlayerUI();
         document.body.classList.add('player-expanded');
         window.dispatchEvent(new CustomEvent('palmplay:trackchange', { detail: { plIndex, tIndex } }));
         recordPlayHistory(track);
-
-        // ── Dynamic Theme from Album Art ────────────────────────────────────────
         applyDynamicTheme(track.art);
-        // ────────────────────────────────────────────────────────────────────────
 
-        // Update playlist view UI if active
         if (state.currentView === 'playlist') {
             const plMainPlayIcon = document.querySelector('#pl-main-play i');
             if (plMainPlayIcon) plMainPlayIcon.className = 'fas fa-pause';
-
-            const rows = document.querySelectorAll('.track-row');
-            rows.forEach((row, idx) => {
+            document.querySelectorAll('.track-row').forEach((row, idx) => {
                 row.classList.toggle('active', idx === tIndex);
             });
         }
@@ -1826,6 +2143,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const track = playlists[state.currentPlaylistIndex].tracks[state.currentTrackIndex];
+        if (!trackNameEl.getAttribute('aria-live')) {
+            trackNameEl.setAttribute('aria-live', 'polite');
+            trackNameEl.setAttribute('aria-atomic', 'true');
+        }
         trackNameEl.textContent = track.name;
         artistNameEl.textContent = track.artist;
         albumArtEl.style.backgroundImage = `url(${track.art})`;
@@ -2035,6 +2356,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${chipsHtml}
             </div>
 
+            ${renderRecentSearchesHtml()}
+
             <h3 class="browse-section-title"><i class="fas fa-globe" style="color:var(--primary); margin-right:8px;"></i>Browse by Language</h3>
             <div class="genre-browse-grid">
                 ${langCards}
@@ -2053,6 +2376,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         cardGrid.appendChild(hub);
+        bindRecentSearchChips(hub);
 
         // Local tracks below (hidden by default, shown on search)
         const localSection = document.createElement('div');
@@ -2511,9 +2835,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     const tracks = await fetchCatalogTracks(query, 30);
                     
                     if (tracks.length === 0) {
-                        audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found for "' + query + '". Try different keywords.</p>';
+                        audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found for "' + escapeHtml(query) + '". Try different keywords.</p>';
                         return;
                     }
+
+                    addRecentSearch(query);
 
                     // Map to internal format and render
                     let audiusPlIndex = playlists.findIndex(pl => pl.id === 'audius_search');
@@ -2549,7 +2875,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                 } catch (e) {
                     console.error('Catalog search failed:', e);
-                    audiusGrid.innerHTML = '<p style="color:#ff4444; padding:20px;"><i class="fas fa-exclamation-triangle"></i> Could not load results. Check your connection.</p>';
+                    showErrorState(audiusGrid, {
+                        icon: 'fa-exclamation-triangle',
+                        title: 'Search failed',
+                        message: navigator.onLine ? 'Could not reach the music service. Try again in a moment.' : 'You appear to be offline.',
+                        onRetry: () => filterCards(query)
+                    });
                 }
             }, 800);
         }
