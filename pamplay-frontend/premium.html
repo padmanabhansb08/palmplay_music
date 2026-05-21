@@ -263,7 +263,7 @@
                     <li><i class="fas fa-check"></i> Advanced metadata editing</li>
                 </ul>
                 <button class="btn-premium btn-primary"
-                    onclick="alert('Welcome to PalmPlay Premium!'); window.location.href='home.html';">Join
+                    onclick="alert('Welcome to PalmPlay Premium!'); (window.PalmPlayRoutes||{go:function(){location.href='home.html'}}).go('home');">Join
                     Premium</button>
             </div>
 
@@ -278,7 +278,7 @@
                     <li><i class="fas fa-check"></i> Cloud backup (coming soon)</li>
                 </ul>
                 <button class="btn-premium btn-primary"
-                    onclick="alert('Welcome to PalmPlay Pro!'); window.location.href='home.html';">Get Started</button>
+                    onclick="alert('Welcome to PalmPlay Pro!'); (window.PalmPlayRoutes||{go:function(){location.href='home.html'}}).go('home');">Get Started</button>
             </div>
         </div>
     </section>

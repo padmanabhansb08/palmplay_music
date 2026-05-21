@@ -115,6 +115,11 @@ db.version(3).stores({
     console.log('Upgraded to DB version 3 with likedSongs store');
 });
 
+/** @returns {typeof window.PalmPlayRoutes} */
+function ppRoutes() {
+    return window.PalmPlayRoutes;
+}
+
 // ─── Audio Engine with Crossfade Support ─────────────────────────────────────
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 const masterGain = audioCtx.createGain();
@@ -366,7 +371,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
         });
         listHtml += `
-            <div class="dropdown-item" onclick="window.location.href='login.html'" style="border: 1px dashed rgba(255,255,255,0.2); justify-content:center; padding:16px;">
+            <div class="dropdown-item" onclick="window.PalmPlayRoutes.go('login')" style="border: 1px dashed rgba(255,255,255,0.2); justify-content:center; padding:16px;">
                 <i class="fas fa-user-plus"></i> Add New Account
             </div>
         </div>`;
@@ -457,11 +462,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.go('search', true);
                 return;
             }
-            this.go(window.location.pathname.includes('explore.html') ? 'search' : 'home', true);
+            this.go(ppRoutes().isExplorePage() ? 'search' : 'home', true);
         },
         go(view, fromHistory = false) {
             if (!fromHistory) this.push(view);
-            const onExplore = window.location.pathname.includes('explore.html');
+            const onExplore = ppRoutes().isExplorePage();
 
             if (view === 'search') {
                 state.currentView = 'search';
@@ -517,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function routeInitialView() {
-        if (window.location.pathname.includes('explore.html')) {
+        if (ppRoutes().isExplorePage()) {
             const discover = !window.location.hash || window.location.hash === '#discover';
             if (discover) window.PalmPlayNav.go('search', true);
             else window.PalmPlayNav.go('explore', true);
@@ -764,12 +769,13 @@ document.addEventListener('DOMContentLoaded', () => {
         navLinks.forEach(link => {
             link.addEventListener('click', (e) => {
                 const href = link.getAttribute('href') || '';
-                const onExplorePage = window.location.pathname.includes('explore.html');
-                const isDiscover = href.includes('#discover') || link.textContent.trim().toLowerCase() === 'discover';
-                const isExploreOnly = link.hasAttribute('data-nav-explore') || (link.textContent.trim().toLowerCase() === 'explore' && !href.includes('#discover'));
+                const onExplorePage = ppRoutes().isExplorePage();
+                const routeKey = link.getAttribute('data-pp-route') || '';
+                const isDiscover = routeKey === 'discover' || href.includes('#discover') || link.textContent.trim().toLowerCase() === 'discover';
+                const isExploreOnly = routeKey === 'explore' || link.hasAttribute('data-nav-explore') || (link.textContent.trim().toLowerCase() === 'explore' && !href.includes('#discover'));
 
-                if (href.includes('home.html') && !window.location.pathname.includes('home.html')) return;
-                if (href.includes('explore.html') && !href.includes('#') && !onExplorePage && isExploreOnly) return;
+                if ((routeKey === 'home' || href.includes('home')) && !ppRoutes().isHomePage()) return;
+                if ((routeKey === 'explore' || href.includes('explore')) && !href.includes('#') && !onExplorePage && isExploreOnly) return;
 
                 e.preventDefault();
                 navLinks.forEach(l => l.classList.remove('active'));
@@ -780,7 +786,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.PalmPlayNav.go('search');
                 } else if (isExploreOnly && onExplorePage) {
                     window.PalmPlayNav.go('explore');
-                } else if (href.includes('home.html')) {
+                } else if (routeKey === 'home' || href.includes('home')) {
                     window.PalmPlayNav.go('home');
                 } else {
                     window.PalmPlayNav.go('search');
@@ -794,8 +800,8 @@ document.addEventListener('DOMContentLoaded', () => {
             filterCards(e.target.value);
         });
         searchInput.addEventListener('focus', () => {
-            if (window.location.pathname.includes('home.html') && state.currentView !== 'search') {
-                window.location.href = 'explore.html#discover';
+            if (ppRoutes().isHomePage() && state.currentView !== 'search') {
+                window.location.href = ppRoutes().page('discover');
             }
         });
 
@@ -969,7 +975,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!savedUser.email) {
             showToast('Please log in or sign up to save your music collection!', 'fa-user-lock');
-            window.location.href = 'login.html';
+            ppRoutes().go('login');
             return;
         }
 
@@ -1130,7 +1136,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (categoryChips) categoryChips.style.display = 'flex';
 
         // Dynamic Title based on Page
-        const isExplore = window.location.pathname.includes('explore.html');
+        const isExplore = ppRoutes().isExplorePage();
         
         if (isExplore) {
             window.renderExplore = renderExplore;
@@ -1152,8 +1158,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     <h2 style="color:white; margin-bottom:16px; font-size:42px; font-weight:800; letter-spacing:-1.5px;">Your personal music hub.</h2>
                     <p style="font-size:18px; margin-bottom:40px; max-width:600px; margin-left:auto; margin-right:auto;">Log in or sign up to access your saved playlists, local tracks, and personalized premium vibes.</p>
                     <div style="display:flex; justify-content:center; gap:20px;">
-                        <button onclick="window.location.href='login.html'" class="upgrade-btn" style="padding: 16px 40px; font-size:16px;">Log In</button>
-                        <button onclick="window.location.href='signup.html'" class="upgrade-btn" style="background:transparent; border:1px solid white; color:white; padding: 16px 40px; font-size:16px;">Sign Up</button>
+                        <button onclick="window.PalmPlayRoutes.go('login')" class="upgrade-btn" style="padding: 16px 40px; font-size:16px;">Log In</button>
+                        <button onclick="window.PalmPlayRoutes.go('signup')" class="upgrade-btn" style="background:transparent; border:1px solid white; color:white; padding: 16px 40px; font-size:16px;">Sign Up</button>
                     </div>
                 </div>
             `;
@@ -1582,7 +1588,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             if (profileBtn) {
                 profileBtn.innerHTML = '<i class="fas fa-user-circle" style="font-size:24px;"></i> Sign In';
-                profileBtn.onclick = () => window.location.href = 'login.html';
+                profileBtn.onclick = () => ppRoutes().go('login');
 
                 // Cleanup dropdown if it exists while logged out
                 const wrapper = profileBtn.parentElement;

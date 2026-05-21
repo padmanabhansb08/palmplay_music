@@ -1,5 +1,28 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": ".",
-  "installCommand": "echo skip"
+  "installCommand": "echo skip",
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/app",
+      "permanent": false
+    }
+  ],
+  "rewrites": [
+    { "source": "/app", "destination": "/pamplay-frontend/home.html" },
+    { "source": "/app/explore", "destination": "/pamplay-frontend/explore.html" },
+    { "source": "/app/login", "destination": "/pamplay-frontend/login.html" },
+    { "source": "/app/signup", "destination": "/pamplay-frontend/signup.html" },
+    { "source": "/app/premium", "destination": "/pamplay-frontend/premium.html" },
+    { "source": "/app/:path*", "destination": "/pamplay-frontend/:path*" }
+  ],
+  "headers": [
+    {
+      "source": "/pamplay-frontend/sw.js",
+      "headers": [
+        { "key": "Service-Worker-Allowed", "value": "/" }
+      ]
+    }
+  ]
 }

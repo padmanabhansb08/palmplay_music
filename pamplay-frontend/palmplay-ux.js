@@ -122,8 +122,9 @@
         },
 
         bindBottomNav() {
-            const isExplorePage = window.location.pathname.includes('explore.html');
-            const isHomePage = window.location.pathname.includes('home.html');
+            const routes = window.PalmPlayRoutes;
+            const isExplorePage = routes?.isExplorePage?.() ?? window.location.pathname.includes('explore');
+            const isHomePage = routes?.isHomePage?.() ?? window.location.pathname.includes('home');
 
             document.querySelectorAll('[data-bottom-nav]').forEach((btn) => {
                 btn.addEventListener('click', () => {
@@ -132,7 +133,7 @@
 
                     if (key === 'home') {
                         if (!isHomePage) {
-                            window.location.href = 'home.html';
+                            window.location.href = routes?.page('home') || 'home.html';
                             return;
                         }
                         window.PalmPlayNav?.go('home');
@@ -140,7 +141,7 @@
                     }
                     if (key === 'explore') {
                         if (!isExplorePage) {
-                            window.location.href = 'explore.html';
+                            window.location.href = routes?.page('explore') || 'explore.html';
                             return;
                         }
                         window.PalmPlayNav?.go('explore');
@@ -148,7 +149,7 @@
                     }
                     if (key === 'discover') {
                         if (!isExplorePage && !isHomePage) {
-                            window.location.href = 'explore.html#discover';
+                            window.location.href = routes?.page('discover') || 'explore.html#discover';
                             return;
                         }
                         window.PalmPlayNav?.go('search');
@@ -338,7 +339,8 @@
                 this.activateBottomNav('discover');
                 return;
             }
-            if (window.location.pathname.includes('explore.html')) {
+            const routes = window.PalmPlayRoutes;
+            if (routes?.isExplorePage?.()) {
                 const active = document.querySelector('.nav-item.active');
                 const label = active?.textContent.trim().toLowerCase();
                 if (label === 'search') {
@@ -346,7 +348,7 @@
                 } else if (label === 'explore') {
                     this.activateBottomNav('explore');
                 }
-            } else if (window.location.pathname.includes('home.html')) {
+            } else if (routes?.isHomePage?.()) {
                 this.activateBottomNav('home');
             }
         }

@@ -283,6 +283,7 @@
             style="color: var(--text-base); text-decoration: none; font-size: 14px; display: block; margin-bottom: 24px;">Forgot
             your password?</a>
 
+        <script src="lib/routes.js"></script>
         <script>
             function showToast(message) {
                 const container = document.getElementById('toast-container');
@@ -313,7 +314,8 @@
                 }
 
                 showToast(`Welcome back, ${name}! Redirecting...`);
-                setTimeout(() => window.location.href = 'home.html', 1500);
+                const home = window.PalmPlayRoutes?.page('home') || 'home.html';
+                setTimeout(() => { window.location.href = home; }, 1500);
             }
 
             document.getElementById('login-form').onsubmit = (e) => {
@@ -340,7 +342,7 @@
         </script>
 
         <div class="footer-links">
-            Don't have an account? <a href="signup.html">Sign up for PalmPlay</a>
+            Don't have an account? <a href="signup.html" data-pp-route="signup">Sign up for PalmPlay</a>
             <div id="toast-container"></div>
         </div>
 </body>

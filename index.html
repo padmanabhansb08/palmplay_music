@@ -330,7 +330,7 @@
     </div>
 
     <div class="explore-wrap">
-        <a href="pamplay-frontend/home.html" class="explore-btn">
+        <a href="/app" class="explore-btn" id="open-app-btn">
             Begin Journey
             <svg class="arrow" width="20" height="10" viewBox="0 0 20 10" fill="none"
                 xmlns="http://www.w3.org/2000/svg">
@@ -341,6 +341,14 @@
         </a>
     </div>
 
+    <script>
+        (function () {
+            const btn = document.getElementById('open-app-btn');
+            if (!btn) return;
+            const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            if (local) btn.setAttribute('href', '/pamplay-frontend/home.html');
+        })();
+    </script>
     <script>
         // The 3 key frames: hand, play button, music note
         const keyFramePaths = [

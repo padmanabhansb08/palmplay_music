@@ -295,6 +295,7 @@
 
         <div id="toast-container"></div>
 
+        <script src="lib/routes.js"></script>
         <script>
             function showToast(message) {
                 const container = document.getElementById('toast-container');
@@ -325,7 +326,7 @@
                 // Check if user already exists
                 if (users.find(u => u.email === email)) {
                     showToast('An account with this email already exists. Please log in.');
-                    setTimeout(() => window.location.href = 'login.html', 2000);
+                    setTimeout(() => { window.location.href = window.PalmPlayRoutes?.page('login') || 'login.html'; }, 2000);
                     return;
                 }
 
@@ -346,13 +347,13 @@
                 }
 
                 showToast(`Welcome to PalmPlay, ${profileName}! Redirecting...`);
-                setTimeout(() => window.location.href = 'home.html', 1500);
+                setTimeout(() => { window.location.href = window.PalmPlayRoutes?.page('home') || 'home.html'; }, 1500);
             };
         </script>
 
 
         <div class="footer-links">
-            Already have an account? <a href="login.html">Log in</a>
+            Already have an account? <a href="login.html" data-pp-route="login">Log in</a>
         </div>
     </div>
 </body>

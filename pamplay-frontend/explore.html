@@ -6,7 +6,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PalmPlay - Personalized Player</title>
+    <title>PalmPlay - Discover & Explore</title>
+    <link rel="canonical" href="https://palmplay-music.vercel.app/app/explore">
+    <meta property="og:url" content="https://palmplay-music.vercel.app/app/explore">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#000000">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="palmplay-ux.css?v=4">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -28,9 +32,9 @@
             </div>
 
             <nav class="nav-menu">
-                <a href="home.html" class="nav-item"><i class="fas fa-home"></i> Home</a>
-                <a href="explore.html#discover" class="nav-item active"><i class="fas fa-search"></i> Discover</a>
-                <a href="explore.html" class="nav-item" data-nav-explore><i class="fas fa-compass"></i> Explore</a>
+                <a href="home.html" data-pp-route="home" class="nav-item"><i class="fas fa-home"></i> Home</a>
+                <a href="explore.html#discover" data-pp-route="discover" class="nav-item active"><i class="fas fa-search"></i> Discover</a>
+                <a href="explore.html" data-pp-route="explore" class="nav-item" data-nav-explore><i class="fas fa-compass"></i> Explore</a>
             </nav>
 
             <div class="library-header"
@@ -80,7 +84,7 @@
                         <i class="fas fa-hand-paper"></i>
                         <span>Gestures: OFF</span>
                     </button>
-                    <button type="button" class="profile-btn" onclick="window.location.href='login.html'">
+                    <button type="button" class="profile-btn" onclick="window.PalmPlayRoutes.go('login')">
                         <img src="https://ui-avatars.com/api/?name=User&background=FF0000&color=fff" alt="" width="28" height="28" style="border-radius:50%">
                         <span class="profile-btn-label">Sign In</span>
                     </button>
@@ -179,10 +183,11 @@
         </div>
     </div>
 
+    <script src="lib/routes.js"></script>
     <script src="catalog-config.js"></script>
     <script src="env-config.js"></script>
-    <script src="app.js?v=7"></script>
-    <script src="palmplay-ux.js?v=3"></script>
+    <script src="app.js?v=8"></script>
+    <script src="palmplay-ux.js?v=4"></script>
 </body>
 
 </html>
