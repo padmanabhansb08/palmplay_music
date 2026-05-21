@@ -284,61 +284,14 @@
             your password?</a>
 
         <script src="lib/routes.js"></script>
+        <script src="supabase-config.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="lib/palmplay-auth.js"></script>
+        <script src="lib/palmplay-login-page.js"></script>
         <script>
-            function showToast(message) {
-                const container = document.getElementById('toast-container');
-                while (container.children.length >= 3) {
-                    container.children[0].remove();
-                }
-                const toast = document.createElement('div');
-                toast.className = 'toast';
-                toast.innerHTML = `<i class="fas fa-info-circle" style="color:var(--primary)"></i> ${message}`;
-                container.appendChild(toast);
-                setTimeout(() => {
-                    toast.classList.add('fade-out');
-                    setTimeout(() => {
-                        if (toast.parentElement) toast.remove();
-                    }, 2000);
-                }, 2500);
-            }
-
-            function setSession(name, email) {
-                const user = { name: name, email: email, isLoggedIn: true };
-                localStorage.setItem('palmplay_user', JSON.stringify(user));
-
-                // Track in account list for switching
-                const accounts = JSON.parse(localStorage.getItem('palmplay_accounts') || '[]');
-                if (!accounts.find(a => a.email === email)) {
-                    accounts.push(user);
-                    localStorage.setItem('palmplay_accounts', JSON.stringify(accounts));
-                }
-
-                showToast(`Welcome back, ${name}! Redirecting...`);
-                const home = window.PalmPlayRoutes?.page('home') || 'home.html';
-                setTimeout(() => { window.location.href = home; }, 1500);
-            }
-
-            document.getElementById('login-form').onsubmit = (e) => {
-                e.preventDefault();
-                const email = document.getElementById('login-email').value;
-                const password = document.getElementById('login-pass').value;
-
-                // Get registered users
-                const users = JSON.parse(localStorage.getItem('palmplay_registered_users') || '[]');
-
-                // Find user and check password
-                const user = users.find(u => u.email === email && u.password === password);
-
-                if (user) {
-                    setSession(user.name, email);
-                } else {
-                    showToast('Invalid email or password. Please try again.');
-                }
-            };
-
-            document.getElementById('google-login').onclick = () => setSession('Google User', 'user@google.com');
-            document.getElementById('facebook-login').onclick = () => setSession('Facebook User', 'user@fb.com');
-            document.getElementById('apple-login').onclick = () => setSession('Apple User', 'user@apple.com');
+            document.addEventListener('DOMContentLoaded', () => {
+                window.PalmPlayLoginPage.initAuthForms('login');
+            });
         </script>
 
         <div class="footer-links">

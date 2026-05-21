@@ -120,6 +120,27 @@ db.version(4).stores({
     likedSongs: "++id, userId, trackName, artist"
 });
 
+window.PalmPlayDB = db;
+
+function getSavedUser() {
+    if (window.PalmPlayAuth?.getUser) return window.PalmPlayAuth.getUser();
+    try {
+        return JSON.parse(localStorage.getItem('palmplay_user') || '{}');
+    } catch (e) {
+        return {};
+    }
+}
+
+function getUserId(user) {
+    const u = user || getSavedUser();
+    return u.id || u.email || null;
+}
+
+function isUserLoggedIn() {
+    const u = getSavedUser();
+    return !!(u.isLoggedIn && getUserId(u));
+}
+
 /** @returns {typeof window.PalmPlayRoutes} */
 function ppRoutes() {
     return window.PalmPlayRoutes;
@@ -322,16 +343,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         switch (action) {
             case 'logout':
-                showModal('Log Out', 'Are you sure you want to log out of PalmPlay?', () => {
-                    // Remove from active session
-                    const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
-                    localStorage.removeItem('palmplay_user');
-
-                    // Also remove from switcher list on explicit logout
-                    const accounts = JSON.parse(localStorage.getItem('palmplay_accounts') || '[]');
-                    const filtered = accounts.filter(a => a.email !== savedUser.email);
-                    localStorage.setItem('palmplay_accounts', JSON.stringify(filtered));
-
+                showModal('Log Out', 'Are you sure you want to log out of PalmPlay?', async () => {
+                    const savedUser = getSavedUser();
+                    if (window.PalmPlayAuth?.signOut) {
+                        await window.PalmPlayAuth.signOut();
+                    } else {
+                        localStorage.removeItem('palmplay_user');
+                    }
+                    if (savedUser.provider === 'local' && savedUser.email) {
+                        const accounts = JSON.parse(localStorage.getItem('palmplay_accounts') || '[]');
+                        const filtered = accounts.filter(a => a.email !== savedUser.email);
+                        localStorage.setItem('palmplay_accounts', JSON.stringify(filtered));
+                    }
                     window.location.reload();
                 });
                 break;
@@ -408,6 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     showToast(`Renamed to "${newName}"`, 'fa-edit');
                     renderSidebar();
                     showPlaylist(index); // Refresh view
+                    window.PalmPlaySync?.pushPlaylist?.(pl).catch((e) => console.warn('Cloud rename', e));
                 } catch (err) {
                     console.error("Rename failed:", err);
                     showToast("Failed to rename", 'fa-exclamation-triangle');
@@ -420,7 +444,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const pl = playlists[index];
         showModal('Delete Folder', `Are you sure you want to delete "${pl.name}"? This will remove all songs inside it.`, async () => {
             try {
-                // Delete tracks first then playlist
+                const row = await db.playlists.get(pl.id);
+                if (row?.cloudId) {
+                    await window.PalmPlaySync?.deleteCloudPlaylist?.({ cloudId: row.cloudId });
+                }
                 await db.tracks.where('playlistId').equals(pl.id).delete();
                 await db.playlists.delete(pl.id);
 
@@ -611,6 +638,16 @@ document.addEventListener('DOMContentLoaded', () => {
         setupMediaSession();
         setupEventListeners();
         setupKeyboardShortcuts();
+        if (window.PalmPlayAuth) await window.PalmPlayAuth.init();
+        const user = getSavedUser();
+        const uid = getUserId(user);
+        if (uid && window.PalmPlaySync?.enabled?.()) {
+            try {
+                await window.PalmPlaySync.pullAndMerge(uid, user.email);
+            } catch (e) {
+                console.warn('Cloud sync pull failed', e);
+            }
+        }
         await loadFromDatabase();
         updatePlayerUI();
         routeInitialView();
@@ -633,15 +670,16 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('Loading from database fresh...');
         playlists = []; // Clear existing state to prevent duplicates
         likedSongs = []; // Clear liked songs
-        const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
-        if (!savedUser.email) {
+        const savedUser = getSavedUser();
+        const uid = getUserId(savedUser);
+        if (!uid) {
             console.log('No user logged in, skipping database load.');
             routeInitialView();
             return;
         }
 
         try {
-            const savedPlaylists = await db.playlists.where('userId').equals(savedUser.email).toArray();
+            const savedPlaylists = await db.playlists.where('userId').equals(uid).toArray();
             for (const pl of savedPlaylists) {
                 const plTracks = await db.tracks.where('playlistId').equals(pl.id).toArray();
 
@@ -680,13 +718,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 playlists.push({
                     id: pl.id,
                     name: pl.name,
-                    tracks: tracksWithUrls
+                    tracks: tracksWithUrls,
+                    cloudId: pl.cloudId || null
                 });
             }
 
             // Load liked songs from DB
             try {
-                const savedLiked = await db.likedSongs.where('userId').equals(savedUser.email).toArray();
+                const savedLiked = await db.likedSongs.where('userId').equals(uid).toArray();
                 likedSongs = savedLiked.map(ls => ({
                     ...ls,
                     art: ls.artBlob ? URL.createObjectURL(ls.artBlob) : (ls.artUrl || ls.art || DEFAULT_ART_URL)
@@ -1110,9 +1149,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const newTracks = [];
-        const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
+        const savedUser = getSavedUser();
 
-        if (!savedUser.email) {
+        const uid = getUserId(savedUser);
+        if (!uid) {
             showToast('Please log in or sign up to save your music collection!', 'fa-user-lock');
             ppRoutes().go('login');
             return;
@@ -1123,7 +1163,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Save to DB first to get a playlist ID
         const plId = await db.playlists.add({
             name: folderName,
-            userId: savedUser.email
+            userId: uid
         });
 
         // Use a loading overlay if possible, or just log
@@ -1140,7 +1180,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const trackData = {
-                userId: savedUser.email,
+                userId: uid,
                 playlistId: plId,
                 name: metadata.title || parseFileName(file.name).title || "Title Not Found",
                 artist: metadata.artist || "Artist Not Found",
@@ -1902,10 +1942,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return data;
     }
 
-    function getSavedUser() {
-        return JSON.parse(localStorage.getItem('palmplay_user') || '{}');
-    }
-
     function normalizeStreamTrack(track) {
         return {
             id: track.id ?? track.externalId ?? null,
@@ -1946,7 +1982,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function createUserPlaylist(name) {
         const user = getSavedUser();
-        if (!user.email) {
+        const uid = getUserId(user);
+        if (!uid) {
             showToast('Log in to create playlists', 'fa-user-lock');
             ppRoutes().go('login');
             return -1;
@@ -1956,18 +1993,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const plId = await db.playlists.add({
             name: trimmed,
-            userId: user.email,
+            userId: uid,
             updatedAt: new Date().toISOString()
         });
-        playlists.push({ id: plId, name: trimmed, tracks: [] });
+        const pl = { id: plId, name: trimmed, tracks: [] };
+        playlists.push(pl);
         renderSidebar();
         showToast(`Playlist "${trimmed}" created`, 'fa-list');
+        window.PalmPlaySync?.pushPlaylist?.(pl).catch((e) => console.warn('Cloud playlist push', e));
         return playlists.length - 1;
     }
 
     async function addTrackToUserPlaylist(plIndex, rawTrack) {
         const user = getSavedUser();
-        if (!user.email) {
+        const uid = getUserId(user);
+        if (!uid) {
             showToast('Log in to save to playlists', 'fa-user-lock');
             ppRoutes().go('login');
             return false;
@@ -1989,7 +2029,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const source = getTrackSource(track);
         const dbId = await db.tracks.add({
-            userId: user.email,
+            userId: uid,
             playlistId: pl.id,
             source,
             externalId: track.id ? String(track.id) : null,
@@ -2012,6 +2052,8 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast(`Added to "${pl.name}"`, 'fa-plus-circle');
         renderSidebar();
         if (state.currentView === 'home') renderHome();
+        window.PalmPlaySync?.pushPlaylist?.(pl).then(() => window.PalmPlaySync?.pushPlaylistTracks?.(pl))
+            .catch((e) => console.warn('Cloud track push', e));
         return true;
     }
 
@@ -2028,8 +2070,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showAddToPlaylistPicker(rawTrack) {
         const track = normalizeStreamTrack(rawTrack);
-        const user = getSavedUser();
-        if (!user.email) {
+        if (!isUserLoggedIn()) {
             showToast('Log in to save playlists', 'fa-user-lock');
             ppRoutes().go('login');
             return;
@@ -2206,7 +2247,7 @@ document.addEventListener('DOMContentLoaded', () => {
         banner.innerHTML = `
             <div class="home-login-banner-text">
                 <strong>Save playlists & likes</strong>
-                <span>Sign in to sync your library on this device.</span>
+                <span>Sign in to sync playlists and likes across devices.</span>
             </div>
             <div class="home-login-banner-actions">
                 <button type="button" class="upgrade-btn home-login-btn" data-pp-login>Log in</button>
@@ -2339,8 +2380,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         header.style.backgroundColor = 'transparent';
-        const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
-        const isLoggedIn = !!savedUser.isLoggedIn;
+        const savedUser = getSavedUser();
+        const isLoggedIn = isUserLoggedIn();
 
         greetingEl.className = 'greeting';
         greetingEl.textContent = isLoggedIn
@@ -2383,7 +2424,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (exploreHero) exploreHero.style.display = 'flex';
         if (categoryChips) categoryChips.style.display = 'flex';
         
-        const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
+        const savedUser = getSavedUser();
         greetingEl.textContent = `Explore the Treat to Your Ears, ${savedUser.name || 'Guest'}`;
         sectionTitleEl.textContent = `${category} Tracks`;
         header.style.backgroundColor = 'transparent';
@@ -2754,10 +2795,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updatePlayerUI() {
         // Update user profile from registration
-        const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
+        const savedUser = getSavedUser();
         const profileBtn = document.querySelector('.profile-btn');
 
-        if (savedUser.isLoggedIn) {
+        if (isUserLoggedIn()) {
             if (profileBtn) {
                 // Ensure the button is wrapped in the relative container if not already
                 if (!profileBtn.parentElement.classList.contains('profile-dropdown-container')) {
@@ -3549,8 +3590,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function toggleLike(track, plIndex, tIndex) {
-        const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
-        if (!savedUser.email) {
+        const savedUser = getSavedUser();
+        const uid = getUserId(savedUser);
+        if (!uid) {
             showToast('Please log in to like songs!', 'fa-user-lock');
             return;
         }
@@ -3568,10 +3610,11 @@ document.addEventListener('DOMContentLoaded', () => {
             likedSongs.splice(existingIndex, 1);
             state.isLiked = false;
             showToast('Removed from Liked Songs', 'fa-heart-broken');
+            window.PalmPlaySync?.removeLike?.(track.name, track.artist).catch((e) => console.warn('Cloud unlike', e));
         } else {
             // Like — store the actual blob data for persistence
             const likedData = {
-                userId: savedUser.email,
+                userId: uid,
                 trackName: track.name,
                 artist: track.artist,
                 album: track.album || null,
@@ -3604,6 +3647,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             state.isLiked = true;
             showToast('Added to Liked Songs', 'fa-heart');
+            const last = likedSongs[likedSongs.length - 1];
+            if (last) window.PalmPlaySync?.pushLike?.(last).catch((e) => console.warn('Cloud like', e));
         }
 
         renderSidebar();
@@ -3623,7 +3668,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (categoryChips) categoryChips.style.display = 'none';
         header.style.backgroundColor = 'transparent';
 
-        const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
+        const savedUser = getSavedUser();
         const userName = savedUser.name || 'User';
         const totalSeconds = likedSongs.reduce((sum, ls) => sum + (ls.duration || 0), 0);
         const hrs = Math.floor(totalSeconds / 3600);

@@ -4,5 +4,6 @@ Thumbs.db
 .vscode/
 .env
 pamplay-frontend/catalog-config.js
+pamplay-frontend/supabase-config.js
 *.log
 .vercel

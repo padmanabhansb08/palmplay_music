@@ -14,6 +14,7 @@ const envPath = fs.existsSync(path.join(root, '.env'))
 
 const publicOut = path.join(root, 'pamplay-frontend', 'env-config.js');
 const catalogOut = path.join(root, 'pamplay-frontend', 'catalog-config.js');
+const supabaseOut = path.join(root, 'pamplay-frontend', 'supabase-config.js');
 
 const publicDefaults = {
     AUDIUS_API_HOST: 'https://discoveryprovider.audius.co',
@@ -29,7 +30,12 @@ const catalogDefaults = {
     MUSIC_CATALOG_API_BASE: '',
 };
 
-const parsed = { ...publicDefaults, ...catalogDefaults };
+const supabaseDefaults = {
+    SUPABASE_URL: '',
+    SUPABASE_ANON_KEY: '',
+};
+
+const parsed = { ...publicDefaults, ...catalogDefaults, ...supabaseDefaults };
 const raw = fs.readFileSync(envPath, 'utf8');
 
 for (const line of raw.split(/\r?\n/)) {
@@ -49,6 +55,8 @@ for (const line of raw.split(/\r?\n/)) {
         parsed[key] = value;
     } else if (key in catalogDefaults) {
         parsed[key] = value;
+    } else if (key in supabaseDefaults) {
+        parsed[key] = value;
     }
 }
 
@@ -63,6 +71,8 @@ for (const key of Object.keys(publicDefaults)) {
 }
 if (process.env.MUSIC_CATALOG_API_BASE) parsed.MUSIC_CATALOG_API_BASE = String(process.env.MUSIC_CATALOG_API_BASE).trim();
 if (process.env.JIOSAAVN_API_BASE) parsed.MUSIC_CATALOG_API_BASE = String(process.env.JIOSAAVN_API_BASE).trim();
+if (process.env.SUPABASE_URL) parsed.SUPABASE_URL = String(process.env.SUPABASE_URL).trim();
+if (process.env.SUPABASE_ANON_KEY) parsed.SUPABASE_ANON_KEY = String(process.env.SUPABASE_ANON_KEY).trim();
 
 const catalogBase = (parsed.MUSIC_CATALOG_API_BASE || '').trim().replace(/\/$/, '');
 
@@ -76,7 +86,17 @@ const catalogJs = `// Auto-generated private catalog config (gitignored)
 window.PALMPLAY_CATALOG = ${JSON.stringify({ apiBase: catalogBase }, null, 4)};
 `;
 
+const supabaseJs = `// Auto-generated Supabase config (gitignored)
+// Regenerate: node scripts/generate-config.js
+window.PALMPLAY_SUPABASE = ${JSON.stringify({
+    url: (parsed.SUPABASE_URL || '').trim(),
+    anonKey: (parsed.SUPABASE_ANON_KEY || '').trim(),
+}, null, 4)};
+`;
+
 fs.writeFileSync(publicOut, publicJs, 'utf8');
 fs.writeFileSync(catalogOut, catalogJs, 'utf8');
+fs.writeFileSync(supabaseOut, supabaseJs, 'utf8');
 console.log('Wrote', publicOut);
 console.log('Wrote', catalogOut);
+console.log('Wrote', supabaseOut);

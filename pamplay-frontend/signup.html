@@ -296,59 +296,14 @@
         <div id="toast-container"></div>
 
         <script src="lib/routes.js"></script>
+        <script src="supabase-config.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+        <script src="lib/palmplay-auth.js"></script>
+        <script src="lib/palmplay-login-page.js"></script>
         <script>
-            function showToast(message) {
-                const container = document.getElementById('toast-container');
-                while (container.children.length >= 3) {
-                    container.children[0].remove();
-                }
-                const toast = document.createElement('div');
-                toast.className = 'toast';
-                toast.innerHTML = `<i class="fas fa-info-circle" style="color:var(--primary)"></i> ${message}`;
-                container.appendChild(toast);
-                setTimeout(() => {
-                    toast.classList.add('fade-out');
-                    setTimeout(() => {
-                        if (toast.parentElement) toast.remove();
-                    }, 2000);
-                }, 2500);
-            }
-
-            document.getElementById('signup-form').onsubmit = (e) => {
-                e.preventDefault();
-                const profileName = document.getElementById('signup-name').value;
-                const email = document.getElementById('signup-email').value;
-                const password = document.getElementById('signup-pass').value;
-
-                // Get existing users or start fresh
-                const users = JSON.parse(localStorage.getItem('palmplay_registered_users') || '[]');
-
-                // Check if user already exists
-                if (users.find(u => u.email === email)) {
-                    showToast('An account with this email already exists. Please log in.');
-                    setTimeout(() => { window.location.href = window.PalmPlayRoutes?.page('login') || 'login.html'; }, 2000);
-                    return;
-                }
-
-                // Add new user
-                const newUser = { name: profileName, email: email, password: password };
-                users.push(newUser);
-                localStorage.setItem('palmplay_registered_users', JSON.stringify(users));
-
-                // Set current session
-                const sessionUser = { name: profileName, email: email, isLoggedIn: true };
-                localStorage.setItem('palmplay_user', JSON.stringify(sessionUser));
-
-                // Track in account list for switching
-                const accounts = JSON.parse(localStorage.getItem('palmplay_accounts') || '[]');
-                if (!accounts.find(a => a.email === email)) {
-                    accounts.push(sessionUser);
-                    localStorage.setItem('palmplay_accounts', JSON.stringify(accounts));
-                }
-
-                showToast(`Welcome to PalmPlay, ${profileName}! Redirecting...`);
-                setTimeout(() => { window.location.href = window.PalmPlayRoutes?.page('home') || 'home.html'; }, 1500);
-            };
+            document.addEventListener('DOMContentLoaded', () => {
+                window.PalmPlayLoginPage.initAuthForms('signup');
+            });
         </script>
 
 
