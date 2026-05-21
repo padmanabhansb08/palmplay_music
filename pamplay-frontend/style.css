@@ -651,13 +651,15 @@ body {
     right: 12px;
     width: 48px;
     height: 48px;
-    background: var(--primary);
+    /* Keep play bubble readable even when dynamic theme shifts --primary too bright */
+    background: #ff1a1a;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 18px;
-    color: white;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
     opacity: 0;
     transform: translateY(20px);
@@ -694,7 +696,7 @@ body {
     align-items: center;
     padding: 0 24px;
     z-index: 1000;
-    min-width: 800px;
+    min-width: 0;
     position: relative;
     padding-top: 12px;
 }

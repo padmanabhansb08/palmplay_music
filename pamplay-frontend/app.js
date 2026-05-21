@@ -97,7 +97,8 @@ const state = {
     repeatMode: 0, // 0: None, 1: All, 2: One
     isMuted: false,
     playbackSpeed: 1.0,
-    gestureMode: false
+    gestureMode: false,
+    recentPlayback: []
 };
 
 // Database Initialization
@@ -1120,12 +1121,31 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
+        audio.onplay = () => {
+            state.isPlaying = true;
+            updatePlayerUI();
+        };
+
+        audio.onpause = () => {
+            state.isPlaying = false;
+            updatePlayerUI();
+        };
+
         audio.onended = () => {
             if (state.repeatMode === 2) { // Repeat One
                 audio.currentTime = 0;
                 audio.play();
-            } else if (state.repeatMode === 1 || state.repeatMode === 0) { // Repeat All or None
-                playNext(); // playNext handles looping to start if at end
+            } else if (state.repeatMode === 1) { // Repeat All
+                playNext(true);
+            } else { // Repeat Off
+                const pl = playlists[state.currentPlaylistIndex];
+                const isLast = !pl || state.currentTrackIndex >= (pl.tracks.length - 1);
+                if (isLast) {
+                    state.isPlaying = false;
+                    updatePlayerUI();
+                } else {
+                    playNext(false);
+                }
             }
         };
     }
@@ -1307,13 +1327,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v2';
+    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v3';
     const HOME_FEED_TTL_MS = 5 * 60 * 1000;
     const PLAY_HISTORY_KEY = 'palmplay_play_history';
     const PLAY_HISTORY_MAX = 50;
     const RECENT_SEARCHES_KEY = 'palmplay_recent_searches';
     const RECENT_SEARCHES_MAX = 15;
     let playbackRecoveryLock = false;
+    let playRequestToken = 0;
 
     function escapeHtml(str) {
         const d = document.createElement('div');
@@ -1917,14 +1938,66 @@ document.addEventListener('DOMContentLoaded', () => {
         return idx;
     }
 
+    function normalizeSearchText(value) {
+        return (value || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function tokenSet(value) {
+        const stop = new Set(['the', 'a', 'an', 'and', 'with', 'feat', 'ft']);
+        return new Set(
+            normalizeSearchText(value)
+                .split(' ')
+                .filter(t => t && !stop.has(t))
+        );
+    }
+
+    function scoreTokenOverlap(want, got) {
+        if (!want.size || !got.size) return 0;
+        let hit = 0;
+        want.forEach((token) => {
+            if (got.has(token)) hit += 1;
+        });
+        return hit / want.size;
+    }
+
+    function computeCuratedMatchScore(track, item) {
+        if (!track) return 0;
+        const targetTitle = normalizeSearchText(item.name);
+        const sourceTitle = normalizeSearchText(track.name);
+        const titleTokensScore = scoreTokenOverlap(tokenSet(item.name), tokenSet(track.name));
+        let titleScore = titleTokensScore;
+        if (sourceTitle === targetTitle) titleScore = 1;
+        else if (sourceTitle.includes(targetTitle) || targetTitle.includes(sourceTitle)) {
+            titleScore = Math.max(titleScore, 0.85);
+        }
+
+        const artistTarget = item.artist.split(',').map(a => a.trim()).filter(Boolean);
+        const artistSource = String(track.artist || '').split(',').map(a => a.trim()).filter(Boolean);
+        const artistScore = scoreTokenOverlap(
+            tokenSet(artistTarget.join(' ')),
+            tokenSet(artistSource.join(' '))
+        );
+
+        return (titleScore * 0.75) + (artistScore * 0.25);
+    }
+
     function pickCuratedMatch(tracks, item) {
         if (!tracks?.length) return null;
-        const want = item.name.toLowerCase();
-        const hit = tracks.find((t) => {
-            const n = (t.name || '').toLowerCase();
-            return n.includes(want) || want.includes(n.slice(0, Math.min(n.length, want.length)));
+        let bestTrack = null;
+        let bestScore = -1;
+        tracks.forEach((track) => {
+            const score = computeCuratedMatchScore(track, item);
+            if (score > bestScore) {
+                bestScore = score;
+                bestTrack = track;
+            }
         });
-        return hit || tracks[0];
+        if (!bestTrack) return null;
+        return { track: bestTrack, score: bestScore };
     }
 
     async function fetchCuratedTrendingTracks() {
@@ -1939,14 +2012,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 batch.map(async (item) => {
                     const q = `${item.name} ${item.artist}`;
                     try {
-                        let tracks = await fetchCatalogTracks(q, 6);
-                        if (!tracks.length) tracks = await fetchAudiusCatalogFallback(q, 6);
-                        const match = pickCuratedMatch(tracks, item);
+                        let tracks = await fetchCatalogTracks(q, 8);
+                        if (!tracks.length) tracks = await fetchAudiusCatalogFallback(q, 8);
+                        let picked = pickCuratedMatch(tracks, item);
+                        if (!picked || picked.score < 0.62) {
+                            const retryTracks = await fetchCatalogTracks(item.name, 8);
+                            const retryPicked = pickCuratedMatch(retryTracks, item);
+                            if (retryPicked && (!picked || retryPicked.score > picked.score)) {
+                                picked = retryPicked;
+                            }
+                        }
+                        const match = picked?.track;
                         if (!match?.url) return null;
+                        const confidentArt = (picked?.score || 0) >= 0.7;
                         return {
                             ...match,
                             name: item.name,
-                            artist: item.artist
+                            artist: item.artist,
+                            art: confidentArt ? (match.art || DEFAULT_ART_URL) : DEFAULT_ART_URL
                         };
                     } catch (e) {
                         console.warn('Curated track resolve failed:', q, e);
@@ -2278,9 +2361,74 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderTrackRow(parent, title, subtitle, tracks, playlistId) {
         if (!tracks?.length) return;
+        const organizedTracks = organizeTracksForSelection(tracks, tracks.length);
         const grid = appendHomeSection(parent, title, subtitle);
-        const plIndex = upsertTempPlaylist(playlistId, title, tracks);
-        tracks.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx)));
+        const plIndex = upsertTempPlaylist(playlistId, title, organizedTracks);
+        organizedTracks.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx)));
+    }
+
+    function normalizeTitleKey(name) {
+        return String(name || '')
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function primaryArtistKey(artist) {
+        return String(artist || '')
+            .split(',')[0]
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim() || 'unknown';
+    }
+
+    function organizeTracksForSelection(tracks, limit = 20) {
+        const uniq = [];
+        const seen = new Set();
+        tracks.forEach((track) => {
+            const key = `${normalizeTitleKey(track.name)}::${primaryArtistKey(track.artist)}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                uniq.push(track);
+            }
+        });
+
+        const buckets = new Map();
+        uniq.forEach((track) => {
+            const key = primaryArtistKey(track.artist);
+            if (!buckets.has(key)) buckets.set(key, []);
+            buckets.get(key).push(track);
+        });
+
+        const keys = Array.from(buckets.keys()).sort((a, b) => buckets.get(b).length - buckets.get(a).length);
+        const organized = [];
+        let guard = 0;
+        while (organized.length < uniq.length && guard < 2000) {
+            guard += 1;
+            let progressed = false;
+            for (const key of keys) {
+                const bucket = buckets.get(key);
+                if (!bucket?.length) continue;
+                const next = bucket.shift();
+                const last = organized[organized.length - 1];
+                if (last && primaryArtistKey(last.artist) === key && bucket.length) {
+                    bucket.push(next);
+                    continue;
+                }
+                organized.push(next);
+                progressed = true;
+                if (organized.length >= uniq.length) break;
+            }
+            if (!progressed) {
+                keys.forEach((k) => {
+                    const bucket = buckets.get(k) || [];
+                    while (bucket.length) organized.push(bucket.shift());
+                });
+            }
+        }
+        return organized.slice(0, limit);
     }
 
     function renderHomeLoginBanner(parent) {
@@ -2660,6 +2808,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function playTrack(plIndex, tIndex) {
         if (playbackRecoveryLock) return;
+        const token = ++playRequestToken;
         state.currentPlaylistIndex = plIndex;
         state.currentTrackIndex = tIndex;
         let track = playlists[plIndex]?.tracks?.[tIndex];
@@ -2677,32 +2826,29 @@ document.addEventListener('DOMContentLoaded', () => {
         playlists[plIndex].tracks[tIndex].url = url;
         track = playlists[plIndex].tracks[tIndex];
         delete track._unplayable;
-
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-
-        const isFirstPlay = !audio.src;
-        const FADE = CROSSFADE_DURATION;
-        const now = audioCtx.currentTime;
-
-        if (!isFirstPlay && currentSource.gain) {
-            currentSource.gain.gain.setValueAtTime(currentSource.gain.gain.value, now);
-            currentSource.gain.gain.linearRampToValueAtTime(0, now + FADE);
-            setTimeout(() => {
-                audio.pause();
-                audio.currentTime = 0;
-            }, FADE * 1000);
-        } else {
-            audio.pause();
-            audio.currentTime = 0;
+        state.recentPlayback.push({
+            plIndex,
+            tIndex,
+            artistKey: primaryArtistKey(track.artist)
+        });
+        if (state.recentPlayback.length > 12) {
+            state.recentPlayback = state.recentPlayback.slice(-12);
         }
 
+        try {
+            if (audioCtx.state === 'suspended') await audioCtx.resume();
+        } catch (e) {
+            console.warn('AudioContext resume failed', e);
+        }
+
+        // Immediate, reliable switch.
+        audio.pause();
+        audio.currentTime = 0;
         audio.src = url;
+        audio.preload = 'auto';
         audio.playbackRate = state.playbackSpeed;
         if (!state.isMuted) {
-            currentSource.gain.gain.setValueAtTime(isFirstPlay ? state.volume : 0, audioCtx.currentTime);
-            if (!isFirstPlay) {
-                currentSource.gain.gain.linearRampToValueAtTime(state.volume, audioCtx.currentTime + FADE);
-            }
+            currentSource.gain.gain.setValueAtTime(state.volume, audioCtx.currentTime);
         }
 
         try {
@@ -2710,18 +2856,23 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('Play blocked:', e);
         }
+        if (token !== playRequestToken) return;
 
-        let ok = await waitForPlaybackReady(9000);
+        let ok = await waitForPlaybackReady(6000);
+        if (token !== playRequestToken) return;
         if (!ok) {
             playbackRecoveryLock = true;
             const retryUrl = await resolveTrackStream(track, true);
             playbackRecoveryLock = false;
+            if (token !== playRequestToken) return;
             if (retryUrl && retryUrl !== url) {
                 playlists[plIndex].tracks[tIndex].url = retryUrl;
+                audio.pause();
+                audio.currentTime = 0;
                 audio.src = retryUrl;
                 try {
                     await audio.play();
-                    ok = await waitForPlaybackReady(8000);
+                    ok = await waitForPlaybackReady(5000);
                 } catch (e2) {
                     console.warn('Retry play failed:', e2);
                     ok = false;
@@ -2751,14 +2902,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function togglePlay() {
+    async function togglePlay() {
         if (!audio.src) return;
         if (state.isPlaying) {
             audio.pause();
+            state.isPlaying = false;
         } else {
-            audio.play();
+            try {
+                await audio.play();
+                state.isPlaying = true;
+            } catch (e) {
+                console.warn('Resume play failed:', e);
+                showToast('Playback blocked. Tap play again.', 'fa-play');
+                state.isPlaying = false;
+            }
         }
-        state.isPlaying = !state.isPlaying;
         updatePlayerUI();
         if (state.currentPlaylistIndex >= 0) {
             const t = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
@@ -2778,14 +2936,40 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function playNext() {
+    function playNext(allowWrap = true) {
         if (state.currentPlaylistIndex === -1) return;
         const pl = playlists[state.currentPlaylistIndex];
 
         if (state.isShuffle) {
-            state.currentTrackIndex = Math.floor(Math.random() * pl.tracks.length);
+            const currentArtist = primaryArtistKey(pl.tracks[state.currentTrackIndex]?.artist);
+            const recent = state.recentPlayback
+                .filter((r) => r.plIndex === state.currentPlaylistIndex)
+                .slice(-4)
+                .map((r) => r.tIndex);
+            let candidates = pl.tracks
+                .map((t, idx) => ({ idx, artist: primaryArtistKey(t.artist) }))
+                .filter((x) => x.idx !== state.currentTrackIndex)
+                .filter((x) => !recent.includes(x.idx))
+                .filter((x) => x.artist !== currentArtist);
+
+            if (!candidates.length) {
+                candidates = pl.tracks
+                    .map((t, idx) => ({ idx, artist: primaryArtistKey(t.artist) }))
+                    .filter((x) => x.idx !== state.currentTrackIndex);
+            }
+            const pick = candidates[Math.floor(Math.random() * candidates.length)];
+            if (pick) state.currentTrackIndex = pick.idx;
         } else {
-            state.currentTrackIndex = (state.currentTrackIndex + 1) % pl.tracks.length;
+            if (state.currentTrackIndex >= pl.tracks.length - 1) {
+                if (!allowWrap) {
+                    state.isPlaying = false;
+                    updatePlayerUI();
+                    return;
+                }
+                state.currentTrackIndex = 0;
+            } else {
+                state.currentTrackIndex += 1;
+            }
         }
 
         playTrack(state.currentPlaylistIndex, state.currentTrackIndex);
@@ -2799,7 +2983,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function seek(e) {
-        if (!audio.src) return;
+        if (!audio.src || !audio.duration) return;
         const rect = progressBar.getBoundingClientRect();
         const pos = (e.clientX - rect.left) / rect.width;
         audio.currentTime = pos * audio.duration;
