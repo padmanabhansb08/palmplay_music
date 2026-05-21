@@ -692,19 +692,19 @@ body {
     backdrop-filter: var(--glass-blur);
     border-top: 1px solid var(--glass-border);
     display: grid;
-    grid-template-columns: 280px 1fr 280px;
+    grid-template-columns: 240px 1fr 220px;
     align-items: center;
-    padding: 0 24px;
+    padding: 6px 16px 4px;
     z-index: 1000;
     min-width: 0;
     position: relative;
-    padding-top: 12px;
+    min-height: 72px;
 }
 
 .track-info {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     min-width: 0;
     overflow: hidden;
 }
@@ -721,8 +721,8 @@ body {
 }
 
 .album-art {
-    width: 64px;
-    height: 64px;
+    width: 50px;
+    height: 50px;
     border-radius: var(--border-radius-sm);
     background-size: cover;
     background-color: #222;
@@ -738,15 +738,15 @@ body {
 
 .track-name {
     font-weight: 700;
-    font-size: 14px;
-    margin-bottom: 2px;
+    font-size: 13px;
+    margin-bottom: 1px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .artist-name {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-subdued);
     white-space: nowrap;
     overflow: hidden;
@@ -759,8 +759,8 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
-    padding: 0 16px;
+    gap: 2px;
+    padding: 0 10px;
 }
 
 .progress-times-wrapper {
@@ -770,12 +770,12 @@ body {
 .control-buttons {
     display: flex;
     align-items: center;
-    gap: 32px;
+    gap: 22px;
     color: var(--text-subdued);
 }
 
 .control-buttons i {
-    font-size: 18px;
+    font-size: 16px;
     width: 20px;
     text-align: center;
     cursor: pointer;
@@ -787,8 +787,8 @@ body {
 }
 
 .play-pause-btn {
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     background: white;
     color: black;
     border-radius: 50%;
@@ -809,7 +809,7 @@ body {
     top: 0;
     left: 0;
     width: 100%;
-    height: 4px;
+    height: 3px;
     z-index: 10;
 }
 
@@ -861,14 +861,14 @@ body {
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    gap: 12px;
+    gap: 8px;
     color: var(--text-subdued);
     min-width: 0;
 }
 
 .volume-bar {
-    width: 100px;
-    height: 4px;
+    width: 84px;
+    height: 3px;
     background: rgba(255, 255, 255, 0.1);
     border-radius: 2px;
     cursor: pointer;
