@@ -1307,7 +1307,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v1';
+    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v2';
     const HOME_FEED_TTL_MS = 5 * 60 * 1000;
     const PLAY_HISTORY_KEY = 'palmplay_play_history';
     const PLAY_HISTORY_MAX = 50;
@@ -1917,6 +1917,48 @@ document.addEventListener('DOMContentLoaded', () => {
         return idx;
     }
 
+    function pickCuratedMatch(tracks, item) {
+        if (!tracks?.length) return null;
+        const want = item.name.toLowerCase();
+        const hit = tracks.find((t) => {
+            const n = (t.name || '').toLowerCase();
+            return n.includes(want) || want.includes(n.slice(0, Math.min(n.length, want.length)));
+        });
+        return hit || tracks[0];
+    }
+
+    async function fetchCuratedTrendingTracks() {
+        const list = window.PALMPLAY_CURATED_TRENDING || [];
+        if (!list.length) return fetchAudiusCatalogFallback('trending', 20);
+
+        const resolved = [];
+        const batchSize = 4;
+        for (let i = 0; i < list.length; i += batchSize) {
+            const batch = list.slice(i, i + batchSize);
+            const chunk = await Promise.all(
+                batch.map(async (item) => {
+                    const q = `${item.name} ${item.artist}`;
+                    try {
+                        let tracks = await fetchCatalogTracks(q, 6);
+                        if (!tracks.length) tracks = await fetchAudiusCatalogFallback(q, 6);
+                        const match = pickCuratedMatch(tracks, item);
+                        if (!match?.url) return null;
+                        return {
+                            ...match,
+                            name: item.name,
+                            artist: item.artist
+                        };
+                    } catch (e) {
+                        console.warn('Curated track resolve failed:', q, e);
+                        return null;
+                    }
+                })
+            );
+            resolved.push(...chunk.filter(Boolean));
+        }
+        return resolved.length ? resolved : fetchAudiusCatalogFallback('trending', 20);
+    }
+
     async function fetchHomeFeed() {
         try {
             const cached = sessionStorage.getItem(HOME_FEED_CACHE_KEY);
@@ -1929,7 +1971,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const [trending, picks] = await Promise.all([
-            fetchAudiusCatalogFallback('trending', 12),
+            fetchCuratedTrendingTracks(),
             fetchCatalogTracks('latest hits', 12)
         ]);
 
