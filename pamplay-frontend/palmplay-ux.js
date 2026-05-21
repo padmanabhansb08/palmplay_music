@@ -45,6 +45,10 @@
                 ov.className = 'sidebar-overlay';
                 document.body.appendChild(ov);
             }
+            const existingNp = document.getElementById('now-playing');
+            if (existingNp && !document.getElementById('np-lyrics-panel')) {
+                existingNp.remove();
+            }
             if (!document.getElementById('now-playing')) {
                 const np = document.createElement('div');
                 np.id = 'now-playing';
@@ -53,18 +57,42 @@
                 np.innerHTML = `
                     <div class="now-playing-header">
                         <button type="button" id="np-close" aria-label="Close"><i class="fas fa-chevron-down"></i></button>
-                        <span style="font-size:12px;color:var(--text-subdued);font-weight:600;letter-spacing:0.08em;">NOW PLAYING</span>
+                        <span class="np-header-label">NOW PLAYING</span>
                         <button type="button" id="np-queue" aria-label="Queue"><i class="fas fa-list-ul"></i></button>
                     </div>
-                    <div class="now-playing-art" id="np-art"></div>
-                    <div class="now-playing-meta">
-                        <h2 id="np-title">—</h2>
-                        <p id="np-artist">—</p>
+                    <div class="now-playing-scroll">
+                        <div class="now-playing-art" id="np-art"></div>
+                        <div class="now-playing-meta">
+                            <p class="np-album" id="np-album"></p>
+                            <h2 id="np-title">—</h2>
+                            <p id="np-artist">—</p>
+                        </div>
+                        <div class="np-progress-row">
+                            <span class="np-time" id="np-time-current">0:00</span>
+                            <div class="np-progress-bar" id="np-progress-bar" role="slider" aria-label="Seek">
+                                <div class="np-progress-fill" id="np-progress-fill"></div>
+                            </div>
+                            <span class="np-time" id="np-time-total">0:00</span>
+                        </div>
+                        <div class="np-actions">
+                            <button type="button" class="np-action-btn" id="np-like" aria-label="Like"><i class="far fa-heart"></i></button>
+                            <button type="button" class="np-action-btn" id="np-add-playlist" aria-label="Add to playlist"><i class="fas fa-plus"></i></button>
+                            <button type="button" class="np-action-btn" id="np-share" aria-label="Share"><i class="fas fa-share-alt"></i></button>
+                        </div>
+                        <div class="np-tabs">
+                            <button type="button" class="np-tab active" data-np-tab="song">Song</button>
+                            <button type="button" class="np-tab" data-np-tab="lyrics">Lyrics</button>
+                        </div>
+                        <div class="np-lyrics-panel" id="np-lyrics-panel" hidden>
+                            <div class="np-lyrics" id="np-lyrics">Lyrics appear here when available.</div>
+                        </div>
                     </div>
                     <div class="now-playing-controls">
-                        <i class="fas fa-step-backward np-prev" style="font-size:22px;cursor:pointer;"></i>
-                        <div class="play-pause-btn np-play"><i class="fas fa-play"></i></div>
-                        <i class="fas fa-step-forward np-next" style="font-size:22px;cursor:pointer;"></i>
+                        <button type="button" class="np-transport np-shuffle" id="np-shuffle" aria-label="Shuffle"><i class="fas fa-random"></i></button>
+                        <button type="button" class="np-transport np-prev" aria-label="Previous"><i class="fas fa-step-backward"></i></button>
+                        <div class="play-pause-btn np-play" aria-label="Play"><i class="fas fa-play"></i></div>
+                        <button type="button" class="np-transport np-next" aria-label="Next"><i class="fas fa-step-forward"></i></button>
+                        <button type="button" class="np-transport np-repeat" id="np-repeat" aria-label="Repeat"><i class="fas fa-redo-alt"></i></button>
                     </div>
                 `;
                 document.body.appendChild(np);
@@ -166,52 +194,161 @@
             });
         },
 
+        _npLyricsKey: '',
+
         bindNowPlaying() {
             const panel = document.getElementById('now-playing');
             const open = () => {
+                const ctx = window.getCurrentPalmPlayTrack?.();
+                if (!ctx?.track) {
+                    if (typeof showToast === 'function') showToast('Play a song first', 'fa-play');
+                    return;
+                }
                 this.syncNowPlaying();
                 panel?.classList.add('open');
                 panel?.setAttribute('aria-hidden', 'false');
+                document.body.classList.add('now-playing-open');
                 this.nowPlayingOpen = true;
             };
             const close = () => {
                 panel?.classList.remove('open');
                 panel?.setAttribute('aria-hidden', 'true');
+                document.body.classList.remove('now-playing-open');
                 this.nowPlayingOpen = false;
             };
-            document.getElementById('player-track-info')?.addEventListener('click', open);
-            document.querySelector('.track-info')?.addEventListener('click', (e) => {
-                if (!e.target.closest('.player-like-btn, .control-btn')) open();
+
+            window.openNowPlaying = open;
+            window.closeNowPlaying = close;
+
+            document.getElementById('player-track-info')?.addEventListener('click', (e) => {
+                if (!e.target.closest('.player-like-btn, .control-btn, #share-track-btn')) open();
             });
+            document.querySelector('.album-art')?.addEventListener('click', open);
+
             document.getElementById('np-close')?.addEventListener('click', close);
             document.getElementById('np-queue')?.addEventListener('click', () => {
                 close();
                 this.toggleQueue(true);
             });
+
             document.querySelector('.np-prev')?.addEventListener('click', () => document.querySelector('.fa-step-backward')?.click());
             document.querySelector('.np-next')?.addEventListener('click', () => document.querySelector('.fa-step-forward')?.click());
             document.querySelector('.np-play')?.addEventListener('click', () => document.querySelector('.play-pause-btn')?.click());
+
+            document.getElementById('np-shuffle')?.addEventListener('click', () => document.querySelector('.fa-random')?.click());
+            document.getElementById('np-repeat')?.addEventListener('click', () => document.querySelector('.fa-redo-alt')?.click());
+
+            document.getElementById('np-like')?.addEventListener('click', () => document.querySelector('.player-like-btn')?.click());
+            document.getElementById('np-add-playlist')?.addEventListener('click', () => {
+                const ctx = window.getCurrentPalmPlayTrack?.();
+                if (ctx?.track && window.showAddToPlaylistPicker) window.showAddToPlaylistPicker(ctx.track);
+            });
+            document.getElementById('np-share')?.addEventListener('click', () => window.shareCurrentTrack?.());
+
+            document.querySelectorAll('.np-tab').forEach((tab) => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.np-tab').forEach((t) => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    const isLyrics = tab.dataset.npTab === 'lyrics';
+                    const lyricsPanel = document.getElementById('np-lyrics-panel');
+                    if (lyricsPanel) lyricsPanel.hidden = !isLyrics;
+                    if (isLyrics) this.loadNowPlayingLyrics();
+                });
+            });
+
+            const npBar = document.getElementById('np-progress-bar');
+            npBar?.addEventListener('click', (e) => {
+                const audioEl = document.getElementById('palmplay-audio');
+                if (!audioEl?.duration) return;
+                const rect = npBar.getBoundingClientRect();
+                const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                audioEl.currentTime = pct * audioEl.duration;
+            });
+
             panel?.addEventListener('click', (e) => {
                 if (e.target === panel) close();
             });
-            window.addEventListener('palmplay:trackchange', () => this.syncNowPlaying());
+
+            window.addEventListener('palmplay:trackchange', () => {
+                this.syncNowPlaying();
+                if (this.nowPlayingOpen) this.loadNowPlayingLyrics(true);
+            });
+            window.addEventListener('palmplay:timeupdate', (e) => this.syncNowPlayingProgress(e.detail));
+        },
+
+        syncNowPlayingProgress(detail) {
+            if (!detail?.duration) return;
+            const fill = document.getElementById('np-progress-fill');
+            const cur = document.getElementById('np-time-current');
+            const tot = document.getElementById('np-time-total');
+            if (fill) fill.style.width = `${detail.progress || 0}%`;
+            if (cur) cur.textContent = this.formatTime(detail.current || 0);
+            if (tot) tot.textContent = this.formatTime(detail.duration || 0);
+        },
+
+        formatTime(sec) {
+            if (!sec || !isFinite(sec)) return '0:00';
+            const m = Math.floor(sec / 60);
+            const s = Math.floor(sec % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        },
+
+        async loadNowPlayingLyrics(force) {
+            const ctx = window.getCurrentPalmPlayTrack?.();
+            const box = document.getElementById('np-lyrics');
+            if (!box || !ctx?.track) return;
+
+            const key = `${ctx.track.name}|${ctx.track.artist}`;
+            if (!force && key === this._npLyricsKey && box.dataset.loaded === '1') return;
+            this._npLyricsKey = key;
+            box.dataset.loaded = '0';
+            box.innerHTML = '<p class="np-lyrics-loading"><i class="fas fa-spinner fa-spin"></i> Loading lyrics…</p>';
+
+            const text = await window.fetchTrackLyrics?.(ctx.track.name, ctx.track.artist, ctx.track.duration);
+            if (key !== this._npLyricsKey) return;
+
+            if (text) {
+                box.textContent = text;
+                box.dataset.loaded = '1';
+            } else {
+                box.innerHTML = '<p class="np-lyrics-empty">No lyrics found for this track.</p>';
+            }
         },
 
         syncNowPlaying() {
+            const ctx = window.getCurrentPalmPlayTrack?.();
             const name = document.querySelector('.track-name')?.textContent;
             const artist = document.querySelector('.artist-name')?.textContent;
             const art = document.querySelector('.album-art')?.style.backgroundImage;
+
             if (name && name !== 'Select a song') {
                 const t = document.getElementById('np-title');
                 const a = document.getElementById('np-artist');
                 const ar = document.getElementById('np-art');
+                const alb = document.getElementById('np-album');
                 if (t) t.textContent = name;
                 if (a) a.textContent = artist;
                 if (ar && art) ar.style.backgroundImage = art;
+                if (alb && ctx?.track?.album) {
+                    const albumLabel = ctx.track.album;
+                    alb.textContent = albumLabel && albumLabel !== 'Stream' && albumLabel !== 'Single' ? albumLabel : '';
+                    alb.style.display = alb.textContent ? 'block' : 'none';
+                }
             }
+
             const icon = document.querySelector('.np-play i');
             const main = document.querySelector('.play-pause-btn i');
             if (icon && main) icon.className = main.className;
+
+            const heart = document.querySelector('.player-like-btn i');
+            const npHeart = document.querySelector('#np-like i');
+            if (heart && npHeart) {
+                npHeart.className = heart.className;
+                npHeart.style.color = heart.style.color || '';
+            }
+
+            document.getElementById('np-shuffle')?.classList.toggle('active', !!ctx?.isShuffle);
+            document.getElementById('np-repeat')?.classList.toggle('active', (ctx?.repeatMode || 0) > 0);
         },
 
         bindQueue() {

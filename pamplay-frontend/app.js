@@ -131,6 +131,7 @@ const masterGain = audioCtx.createGain();
 masterGain.connect(audioCtx.destination);
 
 const audio = new Audio();
+audio.id = 'palmplay-audio';
 audio.crossOrigin = 'anonymous';
 const currentSource = { node: null, gain: null, audio: audio };
 
@@ -1064,20 +1065,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('share-track-btn')?.addEventListener('click', () => shareCurrentTrack());
 
-        const auxButtonsSelector = ['.fa-microphone', '.fa-desktop'];
-        auxButtonsSelector.forEach(selector => {
-            const btn = document.querySelector(selector);
-            if (btn) {
-                btn.addEventListener('click', () => showToast('Feature Coming Soon...', 'fa-star'));
-            }
-        });
-
         // Audio Events
         audio.ontimeupdate = () => {
             if (audio.duration) {
                 state.progress = (audio.currentTime / audio.duration) * 100;
                 progressFill.style.width = `${state.progress}%`;
                 timeCurrent.textContent = formatTime(audio.currentTime);
+                window.dispatchEvent(new CustomEvent('palmplay:timeupdate', {
+                    detail: {
+                        current: audio.currentTime,
+                        duration: audio.duration,
+                        progress: state.progress
+                    }
+                }));
             }
         };
 
@@ -2099,6 +2099,50 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     window.showAddToPlaylistPicker = showAddToPlaylistPicker;
+
+    window.getCurrentPalmPlayTrack = () => {
+        if (state.currentPlaylistIndex < 0) return null;
+        const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+        if (!track) return null;
+        return {
+            track,
+            plIndex: state.currentPlaylistIndex,
+            tIndex: state.currentTrackIndex,
+            isPlaying: state.isPlaying,
+            isShuffle: state.isShuffle,
+            repeatMode: state.repeatMode,
+            currentTime: audio.currentTime,
+            duration: audio.duration
+        };
+    };
+
+    async function fetchTrackLyrics(trackName, artistName, durationSec) {
+        const name = (trackName || '').trim();
+        const artist = (artistName || '').trim();
+        if (!name || !artist) return null;
+
+        try {
+            const params = new URLSearchParams({
+                track_name: name,
+                artist_name: artist
+            });
+            if (durationSec && isFinite(durationSec)) {
+                params.set('duration', String(Math.round(durationSec)));
+            }
+            const res = await fetch(`https://lrclib.net/api/get?${params.toString()}`, {
+                signal: AbortSignal.timeout(7000)
+            });
+            if (!res.ok) return null;
+            const data = await res.json();
+            const text = data.syncedLyrics || data.plainLyrics || data.instrumentalLyrics;
+            return typeof text === 'string' && text.trim() ? text.trim() : null;
+        } catch (e) {
+            console.warn('Lyrics fetch failed', e);
+            return null;
+        }
+    }
+
+    window.fetchTrackLyrics = fetchTrackLyrics;
 
     function attachCardActions(card, track, plIndex, tIdx) {
         card.classList.add('card--has-menu');
