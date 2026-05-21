@@ -42,6 +42,7 @@ for (const line of raw.split(/\r?\n/)) {
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
         value = value.slice(1, -1);
     }
+    value = value.trim();
     if (key === 'JIOSAAVN_API_BASE') {
         parsed.MUSIC_CATALOG_API_BASE = value;
     } else if (key in publicDefaults) {
@@ -58,12 +59,12 @@ for (const key of Object.keys(publicDefaults)) {
 
 // Vercel / CI: overlay from process.env when .env is absent
 for (const key of Object.keys(publicDefaults)) {
-    if (process.env[key]) parsed[key] = process.env[key];
+    if (process.env[key]) parsed[key] = String(process.env[key]).trim();
 }
-if (process.env.MUSIC_CATALOG_API_BASE) parsed.MUSIC_CATALOG_API_BASE = process.env.MUSIC_CATALOG_API_BASE;
-if (process.env.JIOSAAVN_API_BASE) parsed.MUSIC_CATALOG_API_BASE = process.env.JIOSAAVN_API_BASE;
+if (process.env.MUSIC_CATALOG_API_BASE) parsed.MUSIC_CATALOG_API_BASE = String(process.env.MUSIC_CATALOG_API_BASE).trim();
+if (process.env.JIOSAAVN_API_BASE) parsed.MUSIC_CATALOG_API_BASE = String(process.env.JIOSAAVN_API_BASE).trim();
 
-const catalogBase = (parsed.MUSIC_CATALOG_API_BASE || '').replace(/\/$/, '');
+const catalogBase = (parsed.MUSIC_CATALOG_API_BASE || '').trim().replace(/\/$/, '');
 
 const publicJs = `// Auto-generated from ${path.basename(envPath)} — do not edit by hand
 // Regenerate: node scripts/generate-config.js

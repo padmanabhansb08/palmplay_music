@@ -5,7 +5,7 @@ const _catalog = (typeof window !== 'undefined' && window.PALMPLAY_CATALOG) ? wi
 const AUDIUS_HOST = (_env.AUDIUS_API_HOST || 'https://discoveryprovider.audius.co').replace(/\/$/, '');
 const AUDIUS_DISCOVERY_URL = _env.AUDIUS_DISCOVERY_URL || 'https://api.audius.co';
 const AUDIUS_APP_NAME = _env.AUDIUS_APP_NAME || 'PalmPlay';
-const MUSIC_CATALOG_API_BASE = (_catalog.apiBase || '').replace(/\/$/, '');
+const MUSIC_CATALOG_API_BASE = (_catalog.apiBase || '').trim().replace(/\/$/, '');
 const DEFAULT_ART_URL = _env.DEFAULT_ART_URL || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
 
 const TRAFFIC_LIMITS = {
@@ -56,7 +56,7 @@ const catalogTraffic = {
         if (!sessionStorage.getItem('palmplay_fallback_toast')) {
             sessionStorage.setItem('palmplay_fallback_toast', '1');
             if (typeof showToast === 'function') {
-                showToast('High demand — showing Audius picks for now', 'fa-bolt');
+                showToast('High demand — showing alternate picks for now', 'fa-bolt');
             }
         }
     },
@@ -283,8 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const trackNameEl = document.querySelector('.track-name');
     const artistNameEl = document.querySelector('.artist-name');
     const albumArtEl = document.querySelector('.album-art');
-    const timeCurrent = document.querySelector('.progress-time:first-child');
-    const timeTotal = document.querySelector('.progress-time:last-child');
+    const timeCurrent = document.getElementById('time-current') || document.querySelector('.progress-time:first-child');
+    const timeTotal = document.getElementById('time-total') || document.querySelector('.progress-time:last-child');
     const cardGrid = document.querySelector('.card-grid');
     const localTracksList = document.querySelector('#local-tracks-list');
     const greetingEl = document.querySelector('.greeting');
@@ -429,11 +429,109 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Initialization
+    function skeletonCardGrid(count = 6) {
+        return `<div class="skeleton-grid">${Array(count).fill(0).map(() => `
+            <div class="skeleton-card">
+                <div class="skeleton-shimmer skeleton-card-art"></div>
+                <div class="skeleton-shimmer skeleton-card-line"></div>
+                <div class="skeleton-shimmer skeleton-card-line short"></div>
+            </div>`).join('')}</div>`;
+    }
+
+    window.skeletonCardGrid = skeletonCardGrid;
+
+    const navHistory = [];
+
+    window.PalmPlayNav = {
+        push(view) {
+            if (navHistory[navHistory.length - 1] !== view) navHistory.push(view);
+        },
+        back() {
+            if (navHistory.length > 1) {
+                navHistory.pop();
+                const prev = navHistory[navHistory.length - 1];
+                this.go(prev, true);
+                return;
+            }
+            if (state.currentView === 'language') {
+                this.go('search', true);
+                return;
+            }
+            this.go(window.location.pathname.includes('explore.html') ? 'search' : 'home', true);
+        },
+        go(view, fromHistory = false) {
+            if (!fromHistory) this.push(view);
+            const onExplore = window.location.pathname.includes('explore.html');
+
+            if (view === 'search') {
+                state.currentView = 'search';
+                if (searchContainer) {
+                    searchContainer.style.display = 'flex';
+                    searchContainer.classList.add('header-search--always');
+                }
+                if (viewHeader) viewHeader.style.display = 'none';
+                if (exploreHero) exploreHero.style.display = 'none';
+                if (categoryChips) categoryChips.style.display = 'none';
+                greetingEl && (greetingEl.style.display = 'none');
+                renderSearch();
+                window.PalmPlayUX?.activateBottomNav?.('discover');
+                return;
+            }
+            if (view === 'explore' && onExplore) {
+                state.currentView = 'explore';
+                if (searchContainer) searchContainer.style.display = 'flex';
+                if (viewHeader) viewHeader.style.display = 'block';
+                if (exploreHero) exploreHero.style.display = 'flex';
+                if (categoryChips) categoryChips.style.display = 'flex';
+                greetingEl && (greetingEl.style.display = 'block');
+                const chip = document.querySelector('.chip.active');
+                renderExplore(chip?.getAttribute('data-genre') || 'Trending');
+                window.PalmPlayUX?.activateBottomNav?.('explore');
+                return;
+            }
+            state.currentView = 'home';
+            if (searchContainer && !onExplore) searchContainer.style.display = 'none';
+            if (viewHeader) viewHeader.style.display = 'block';
+            renderHome();
+            window.PalmPlayUX?.activateBottomNav?.('home');
+        }
+    };
+
+    window.PalmPlayQueue = {
+        getUpNext() {
+            if (state.currentPlaylistIndex < 0) return [];
+            const pl = playlists[state.currentPlaylistIndex];
+            if (!pl?.tracks?.length) return [];
+            return pl.tracks.map((t, ti) => ({
+                plIndex: state.currentPlaylistIndex,
+                tIndex: ti,
+                name: t.name,
+                artist: t.artist,
+                art: t.art || DEFAULT_ART_URL,
+                isCurrent: ti === state.currentTrackIndex
+            })).filter((_, ti) => ti >= state.currentTrackIndex);
+        },
+        playAt(plIndex, tIndex) {
+            playTrack(plIndex, tIndex);
+        }
+    };
+
+    function routeInitialView() {
+        if (window.location.pathname.includes('explore.html')) {
+            const discover = !window.location.hash || window.location.hash === '#discover';
+            if (discover) window.PalmPlayNav.go('search', true);
+            else window.PalmPlayNav.go('explore', true);
+        } else {
+            renderHome();
+        }
+    }
+
     async function init() {
         setupEventListeners();
         setupKeyboardShortcuts();
         await loadFromDatabase();
         updatePlayerUI();
+        routeInitialView();
     }
 
     async function loadFromDatabase() {
@@ -443,7 +541,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
         if (!savedUser.email) {
             console.log('No user logged in, skipping database load.');
-            renderHome();
+            routeInitialView();
             return;
         }
 
@@ -491,7 +589,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (audiusPlIndex === -1) {
                         playlists.push({
                             id: 'audius_search',
-                            name: 'Audius Search Results',
+                            name: 'Search Results',
                             tracks: [],
                             isTemporary: true
                         });
@@ -517,7 +615,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             renderSidebar();
-            renderHome();
         } catch (error) {
             console.error('Failed to load songs:', error);
         }
@@ -627,6 +724,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     toggleShuffle();
                     showToast(state.isShuffle ? 'Shuffle On' : 'Shuffle Off', 'fa-random');
                     break;
+                case 'q': case 'Q':
+                    e.preventDefault();
+                    if (typeof window.toggleQueue === 'function') window.toggleQueue();
+                    break;
             }
         });
 
@@ -662,27 +763,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const navLinks = document.querySelectorAll('.nav-item');
         navLinks.forEach(link => {
             link.addEventListener('click', (e) => {
-                const href = link.getAttribute('href');
-                // Allow navigation if it's a different HTML file
-                if (href && href.includes('.html') && !href.includes(window.location.pathname.split('/').pop())) {
-                    return; // Let the browser navigate
-                }
+                const href = link.getAttribute('href') || '';
+                const onExplorePage = window.location.pathname.includes('explore.html');
+                const isDiscover = href.includes('#discover') || link.textContent.trim().toLowerCase() === 'discover';
+                const isExploreOnly = link.hasAttribute('data-nav-explore') || (link.textContent.trim().toLowerCase() === 'explore' && !href.includes('#discover'));
+
+                if (href.includes('home.html') && !window.location.pathname.includes('home.html')) return;
+                if (href.includes('explore.html') && !href.includes('#') && !onExplorePage && isExploreOnly) return;
 
                 e.preventDefault();
                 navLinks.forEach(l => l.classList.remove('active'));
                 link.classList.add('active');
+                window.PalmPlayUX?.activateBottomNav?.(isDiscover ? 'discover' : isExploreOnly ? 'explore' : 'home');
 
-                const view = link.textContent.trim().toLowerCase();
-                if (view === 'home' || view === 'explore') {
-                    state.currentView = 'home';
-                    searchContainer.style.display = 'none';
-                    viewHeader.style.display = 'block';
-                    renderHome();
-                } else if (view === 'search') {
-                    state.currentView = 'search';
-                    searchContainer.style.display = 'flex';
-                    viewHeader.style.display = 'none';
-                    renderSearch();
+                if (isDiscover) {
+                    window.PalmPlayNav.go('search');
+                } else if (isExploreOnly && onExplorePage) {
+                    window.PalmPlayNav.go('explore');
+                } else if (href.includes('home.html')) {
+                    window.PalmPlayNav.go('home');
+                } else {
+                    window.PalmPlayNav.go('search');
                 }
             });
         });
@@ -692,14 +793,15 @@ document.addEventListener('DOMContentLoaded', () => {
         searchInput.addEventListener('input', (e) => {
             filterCards(e.target.value);
         });
+        searchInput.addEventListener('focus', () => {
+            if (window.location.pathname.includes('home.html') && state.currentView !== 'search') {
+                window.location.href = 'explore.html#discover';
+            }
+        });
 
         // Back Navigation
-        document.querySelector('.fa-chevron-left').parentElement.onclick = () => {
-            if (state.currentView !== 'home') {
-                const homeLink = document.querySelector('.nav-item');
-                if (homeLink) homeLink.click();
-            }
-        };
+        const backBtn = document.querySelector('.fa-chevron-left')?.parentElement;
+        if (backBtn) backBtn.onclick = () => window.PalmPlayNav.back();
 
         // Category Chips for Explore Page
         const chips = document.querySelectorAll('.chip');
@@ -730,7 +832,7 @@ document.addEventListener('DOMContentLoaded', () => {
         volumeBar.addEventListener('click', setVolume);
 
         // Heart / Like Control
-        const heartBtn = document.querySelector('.track-info .control-btn');
+        const heartBtn = document.querySelector('.player-like-btn') || document.querySelector('.track-info .control-btn');
         if (heartBtn) {
             heartBtn.addEventListener('click', async () => {
                 if (state.currentPlaylistIndex === -1) return;
@@ -1104,7 +1206,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sectionTitleEl.textContent = `${category} Tracks`;
         header.style.backgroundColor = 'transparent';
         
-        cardGrid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding: 40px; color: var(--text-subdued);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 16px;"></i><p>Loading Audius Network...</p></div>';
+        cardGrid.innerHTML = `<div style="grid-column:1/-1">${skeletonCardGrid(8)}</div>`;
         cardGrid.style.display = 'grid';
         
         try {
@@ -1132,7 +1234,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 audiusPlIndex = playlists.length;
                 playlists.push({
                     id: 'audius_explore',
-                    name: 'Audius Explore',
+                    name: 'Explore Mix',
                     tracks: [],
                     isTemporary: true
                 });
@@ -1142,7 +1244,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 id: t.id,
                 name: t.title,
                 artist: t.user?.name || 'Unknown',
-                album: 'Audius',
+                album: 'Explore',
                 duration: t.duration,
                 url: `${AUDIUS_HOST}/v1/tracks/${t.id}/stream?app_name=${AUDIUS_APP_NAME}`,
                 art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || DEFAULT_ART_URL,
@@ -1167,7 +1269,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
         } catch (err) {
             console.error("Explore API Error:", err);
-            cardGrid.innerHTML = '<div style="grid-column: 1/-1; color:#ff4444; padding:20px;">Failed to fetch tracks from Audius.</div>';
+            cardGrid.innerHTML = '<div class="state-message" style="grid-column:1/-1"><i class="fas fa-cloud-download-alt"></i><p>Could not load tracks. Try another category.</p><button class="upgrade-btn retry-btn" onclick="document.querySelector(\'.chip.active\')?.click()">Retry</button></div>';
         }
     }
 
@@ -1336,6 +1438,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         state.isPlaying = true;
         updatePlayerUI();
+        document.body.classList.add('player-expanded');
+        window.dispatchEvent(new CustomEvent('palmplay:trackchange', { detail: { plIndex, tIndex } }));
 
         // ── Dynamic Theme from Album Art ────────────────────────────────────────
         applyDynamicTheme(track.art);
@@ -1491,7 +1595,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (state.currentPlaylistIndex === -1) {
             trackNameEl.textContent = "Select a song";
-            artistNameEl.textContent = "Add music from sidebar";
+            artistNameEl.textContent = "Discover music below";
+            document.body.classList.remove('player-expanded');
             return;
         }
 
@@ -1501,7 +1606,7 @@ document.addEventListener('DOMContentLoaded', () => {
         albumArtEl.style.backgroundImage = `url(${track.art})`;
 
         // Sync heart icon with liked state
-        const heartBtn = document.querySelector('.track-info .control-btn');
+        const heartBtn = document.querySelector('.player-like-btn') || document.querySelector('.track-info .control-btn');
         if (heartBtn) {
             const liked = isTrackLiked(track);
             state.isLiked = liked;
@@ -1540,7 +1645,7 @@ document.addEventListener('DOMContentLoaded', () => {
             id: t.id,
             name: t.title,
             artist: t.user?.name || 'Unknown',
-            album: 'Audius',
+            album: 'Stream',
             duration: parseInt(t.duration, 10) || 200,
             language: '',
             plays: t.play_count || 0,
@@ -1719,10 +1824,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <i class="fas fa-fire" style="color:var(--primary); margin-right:8px;"></i>Trending Right Now
             </h3>
             <div class="card-grid trending-grid" id="search-trending-grid" style="display:grid;">
-                <div style="grid-column: 1/-1; text-align:center; padding:30px; color:var(--text-subdued);">
-                    <i class="fas fa-spinner fa-spin" style="font-size:20px;"></i>
-                    <p style="margin-top:8px;">Loading trending tracks...</p>
-                </div>
+                ${skeletonCardGrid(6)}
             </div>
         `;
         cardGrid.appendChild(hub);
@@ -1911,7 +2013,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <i class="fas ${moodIcons[mood] || 'fa-music'}" style="color:var(--primary); margin-right:8px;"></i>${lang.name} ${mood}
                 </h3>
                 <div class="lang-mood-scroll" id="mood-grid-${mood.replace(/[^a-zA-Z]/g, '')}">
-                    <div class="mood-loader"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+                    <div class="skeleton-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));">${Array(4).fill('<div class="skeleton-card"><div class="skeleton-shimmer skeleton-card-art"></div><div class="skeleton-shimmer skeleton-card-line"></div></div>').join('')}</div>
                 </div>
             </div>`
         ).join('');
@@ -1919,7 +2021,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cardGrid.innerHTML = `
             <div class="lang-page" style="animation: hubFadeIn 0.4s ease;">
                 <div class="lang-hero" style="background: ${lang.grad}">
-                    <button class="lang-back-btn" onclick="document.querySelector('.nav-item:last-child').click()">
+                    <button class="lang-back-btn" type="button">
                         <i class="fas fa-arrow-left"></i> Back
                     </button>
                     <div class="lang-hero-script">${lang.script}</div>
@@ -1963,8 +2065,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (backBtn) {
             backBtn.onclick = (e) => {
                 e.preventDefault();
-                state.currentView = 'search';
-                renderSearch();
+                window.PalmPlayNav.back();
             };
         }
 
@@ -2155,7 +2256,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 card.style.display = isMatch ? 'block' : 'none';
             });
 
-            // Debounced Audius Fetch
+            // Debounced catalog search
             clearTimeout(audiusSearchTimeout);
             const audiusContainer = document.getElementById('audius-results');
             const audiusGrid = document.getElementById('audius-card-grid');
