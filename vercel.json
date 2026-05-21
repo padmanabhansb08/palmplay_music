@@ -15,13 +15,29 @@
     { "source": "/app/login", "destination": "/pamplay-frontend/login.html" },
     { "source": "/app/signup", "destination": "/pamplay-frontend/signup.html" },
     { "source": "/app/premium", "destination": "/pamplay-frontend/premium.html" },
+    { "source": "/app/sw.js", "destination": "/pamplay-frontend/sw.js" },
+    { "source": "/app/manifest.webmanifest", "destination": "/pamplay-frontend/manifest.webmanifest" },
     { "source": "/app/:path*", "destination": "/pamplay-frontend/:path*" }
   ],
   "headers": [
     {
       "source": "/pamplay-frontend/sw.js",
       "headers": [
-        { "key": "Service-Worker-Allowed", "value": "/" }
+        { "key": "Service-Worker-Allowed", "value": "/" },
+        { "key": "Cache-Control", "value": "no-cache" }
+      ]
+    },
+    {
+      "source": "/app/sw.js",
+      "headers": [
+        { "key": "Service-Worker-Allowed", "value": "/" },
+        { "key": "Cache-Control", "value": "no-cache" }
+      ]
+    },
+    {
+      "source": "/pamplay-frontend/manifest.webmanifest",
+      "headers": [
+        { "key": "Content-Type", "value": "application/manifest+json" }
       ]
     }
   ]

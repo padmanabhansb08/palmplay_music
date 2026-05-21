@@ -542,8 +542,72 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function setupMediaSession() {
+        if (!('mediaSession' in navigator)) return;
+
+        const safeHandler = (action, fn) => {
+            try {
+                navigator.mediaSession.setActionHandler(action, fn);
+            } catch (err) {
+                console.warn('MediaSession action not supported:', action, err);
+            }
+        };
+
+        safeHandler('play', () => {
+            if (audio.src && !state.isPlaying) togglePlay();
+        });
+        safeHandler('pause', () => {
+            if (state.isPlaying) togglePlay();
+        });
+        safeHandler('previoustrack', () => playPrev());
+        safeHandler('nexttrack', () => playNext());
+        safeHandler('seekbackward', (details) => {
+            if (!audio.src || !audio.duration) return;
+            const offset = details?.seekOffset ?? 10;
+            audio.currentTime = Math.max(0, audio.currentTime - offset);
+        });
+        safeHandler('seekforward', (details) => {
+            if (!audio.src || !audio.duration) return;
+            const offset = details?.seekOffset ?? 10;
+            audio.currentTime = Math.min(audio.duration, audio.currentTime + offset);
+        });
+    }
+
+    function updateMediaSession(track) {
+        if (!('mediaSession' in navigator)) return;
+
+        if (!track || state.currentPlaylistIndex < 0) {
+            try {
+                navigator.mediaSession.metadata = null;
+                navigator.mediaSession.playbackState = 'none';
+            } catch (e) { /* ignore */ }
+            return;
+        }
+
+        const art = track.art || DEFAULT_ART_URL;
+        const artwork = [];
+        if (art && !art.startsWith('data:')) {
+            artwork.push({ src: art, sizes: '96x96', type: 'image/png' });
+            artwork.push({ src: art, sizes: '256x256', type: 'image/png' });
+            artwork.push({ src: art, sizes: '512x512', type: 'image/png' });
+        }
+
+        try {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: track.name || 'PalmPlay',
+                artist: track.artist || 'Unknown artist',
+                album: (track.album && track.album !== 'Stream') ? track.album : 'PalmPlay',
+                artwork: artwork.length ? artwork : undefined
+            });
+            navigator.mediaSession.playbackState = state.isPlaying ? 'playing' : 'paused';
+        } catch (e) {
+            console.warn('MediaSession metadata failed', e);
+        }
+    }
+
     async function init() {
         setupConnectivityBanner();
+        setupMediaSession();
         setupEventListeners();
         setupKeyboardShortcuts();
         await loadFromDatabase();
@@ -2545,6 +2609,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         state.isPlaying = true;
         updatePlayerUI();
+        updateMediaSession(track);
         document.body.classList.add('player-expanded');
         window.dispatchEvent(new CustomEvent('palmplay:trackchange', { detail: { plIndex, tIndex } }));
         recordPlayHistory(track);
@@ -2568,6 +2633,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         state.isPlaying = !state.isPlaying;
         updatePlayerUI();
+        if (state.currentPlaylistIndex >= 0) {
+            const t = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+            if (t) updateMediaSession(t);
+        }
 
         // Update playlist view UI if active
         if (state.currentView === 'playlist') {
@@ -2699,6 +2768,7 @@ document.addEventListener('DOMContentLoaded', () => {
             trackNameEl.textContent = "Select a song";
             artistNameEl.textContent = "Discover music below";
             document.body.classList.remove('player-expanded');
+            updateMediaSession(null);
             return;
         }
 
@@ -2726,6 +2796,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (audio.duration) {
             timeTotal.textContent = formatTime(audio.duration);
         }
+
+        updateMediaSession(track);
     }
 
     function decodeHtmlEntities(str) {

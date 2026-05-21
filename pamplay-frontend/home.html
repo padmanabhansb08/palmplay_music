@@ -9,9 +9,14 @@
     <meta property="og:title" content="PalmPlay Music">
     <meta property="og:url" content="https://palmplay-music.vercel.app/app">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="PalmPlay">
     <meta name="theme-color" content="#000000">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="assets/gallery/p1.png">
     <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="palmplay-ux.css?v=8">
+    <link rel="stylesheet" href="palmplay-ux.css?v=9">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
@@ -163,9 +168,10 @@
     </div>
 
     <script src="lib/routes.js"></script>
+    <script src="lib/pwa.js"></script>
     <script src="catalog-config.js"></script>
     <script src="env-config.js"></script>
-    <script src="app.js?v=12"></script>
+    <script src="app.js?v=13"></script>
     <script src="palmplay-ux.js?v=4"></script>
 </body>
 
