@@ -1127,17 +1127,252 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function renderHome() {
+    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v1';
+    const HOME_FEED_TTL_MS = 5 * 60 * 1000;
+    const PLAY_HISTORY_KEY = 'palmplay_play_history';
+    const PLAY_HISTORY_MAX = 50;
+
+    function escapeHtml(str) {
+        const d = document.createElement('div');
+        d.textContent = str == null ? '' : String(str);
+        return d.innerHTML;
+    }
+
+    function getPlayHistory() {
+        try {
+            const raw = localStorage.getItem(PLAY_HISTORY_KEY);
+            const list = raw ? JSON.parse(raw) : [];
+            return Array.isArray(list) ? list : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function recordPlayHistory(track) {
+        if (!track?.url || !track?.name) return;
+        const entry = {
+            playedAt: Date.now(),
+            id: track.id || null,
+            name: track.name,
+            artist: track.artist || 'Unknown',
+            album: track.album || '',
+            duration: track.duration || 0,
+            url: track.url,
+            art: track.art || DEFAULT_ART_URL,
+            isAudius: !!track.isAudius,
+            isCatalog: !!track.isCatalog,
+            isCatalogFallback: !!track.isCatalogFallback
+        };
+        let hist = getPlayHistory().filter(h => !(h.name === entry.name && h.artist === entry.artist));
+        hist.unshift(entry);
+        hist = hist.slice(0, PLAY_HISTORY_MAX);
+        localStorage.setItem(PLAY_HISTORY_KEY, JSON.stringify(hist));
+    }
+
+    function upsertTempPlaylist(id, name, tracks) {
+        let idx = playlists.findIndex(pl => pl.id === id);
+        if (idx === -1) {
+            playlists.push({ id, name, tracks, isTemporary: true });
+            return playlists.length - 1;
+        }
+        playlists[idx].tracks = tracks;
+        playlists[idx].name = name;
+        return idx;
+    }
+
+    async function fetchHomeFeed() {
+        try {
+            const cached = sessionStorage.getItem(HOME_FEED_CACHE_KEY);
+            if (cached) {
+                const { ts, data } = JSON.parse(cached);
+                if (Date.now() - ts < HOME_FEED_TTL_MS && data) return data;
+            }
+        } catch (e) {
+            console.warn('Home feed cache read failed', e);
+        }
+
+        const [trending, picks] = await Promise.all([
+            fetchAudiusCatalogFallback('trending', 12),
+            fetchCatalogTracks('latest hits', 12)
+        ]);
+
+        const data = { trending: trending || [], picks: picks || [] };
+        try {
+            sessionStorage.setItem(HOME_FEED_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+        } catch (e) {
+            console.warn('Home feed cache write failed', e);
+        }
+        return data;
+    }
+
+    function createTrackCard(track, plIndex, tIdx) {
+        const card = document.createElement('div');
+        card.className = 'card audius-card';
+        const art = track.art || DEFAULT_ART_URL;
+        card.innerHTML = `
+            <div class="card-image" style="background-image: url('${escapeHtml(art)}')">
+                <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+            </div>
+            <div class="card-title">${escapeHtml(track.name)}</div>
+            <div class="card-desc">${escapeHtml(track.artist)}</div>
+        `;
+        card.onclick = () => playTrack(plIndex, tIdx);
+        return card;
+    }
+
+    function appendHomeSection(parent, title, subtitle) {
+        const section = document.createElement('section');
+        section.className = 'home-section';
+        section.innerHTML = `
+            <div class="home-section-head">
+                <div>
+                    <h3 class="home-section-title">${escapeHtml(title)}</h3>
+                    ${subtitle ? `<p class="home-section-sub">${escapeHtml(subtitle)}</p>` : ''}
+                </div>
+            </div>
+            <div class="home-section-grid card-grid"></div>
+        `;
+        parent.appendChild(section);
+        return section.querySelector('.home-section-grid');
+    }
+
+    function renderTrackRow(parent, title, subtitle, tracks, playlistId) {
+        if (!tracks?.length) return;
+        const grid = appendHomeSection(parent, title, subtitle);
+        const plIndex = upsertTempPlaylist(playlistId, title, tracks);
+        tracks.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx)));
+    }
+
+    function renderHomeLoginBanner(parent) {
+        const banner = document.createElement('div');
+        banner.className = 'home-login-banner';
+        banner.innerHTML = `
+            <div class="home-login-banner-text">
+                <strong>Save playlists & likes</strong>
+                <span>Sign in to sync your library on this device.</span>
+            </div>
+            <div class="home-login-banner-actions">
+                <button type="button" class="upgrade-btn home-login-btn" data-pp-login>Log in</button>
+                <button type="button" class="upgrade-btn home-signup-btn" data-pp-signup>Sign up</button>
+            </div>
+        `;
+        banner.querySelector('[data-pp-login]').onclick = () => ppRoutes().go('login');
+        banner.querySelector('[data-pp-signup]').onclick = () => ppRoutes().go('signup');
+        parent.appendChild(banner);
+    }
+
+    function renderHomeQuickActions(parent) {
+        const row = document.createElement('div');
+        row.className = 'home-quick-actions';
+        const actions = [
+            { label: 'Discover', icon: 'fa-search', route: 'discover' },
+            { label: 'Explore', icon: 'fa-compass', route: 'explore' },
+            { label: 'Languages', icon: 'fa-globe', route: 'discover' }
+        ];
+        actions.forEach((a) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'home-quick-chip';
+            btn.innerHTML = `<i class="fas ${a.icon}"></i> ${escapeHtml(a.label)}`;
+            btn.onclick = () => {
+                if (a.route === 'explore') ppRoutes().go('explore');
+                else ppRoutes().go('discover');
+            };
+            row.appendChild(btn);
+        });
+        const wrap = document.createElement('section');
+        wrap.className = 'home-section home-section--compact';
+        wrap.innerHTML = '<h3 class="home-section-title">Jump in</h3>';
+        wrap.appendChild(row);
+        parent.appendChild(wrap);
+    }
+
+    function renderHomeLibrarySection(parent, savedUser) {
+        const userPlaylists = playlists.filter(pl => !pl.isTemporary && pl.tracks?.length);
+        if (userPlaylists.length === 0) {
+            const empty = document.createElement('section');
+            empty.className = 'home-section home-library-hint';
+            empty.innerHTML = `
+                <h3 class="home-section-title">Your collection</h3>
+                <p>Add music from your device with the <strong><i class="fas fa-plus"></i></strong> button in the sidebar, or save tracks from Discover.</p>
+            `;
+            parent.appendChild(empty);
+            return;
+        }
+
+        const grid = appendHomeSection(parent, 'Your playlists', `${userPlaylists.length} on this device`);
+        grid.style.display = 'grid';
+        playlists.forEach((pl, index) => {
+            if (pl.isTemporary || !pl.tracks?.length) return;
+            const card = document.createElement('div');
+            card.className = 'card';
+            const art = pl.tracks[0]?.art || DEFAULT_ART_URL;
+            card.innerHTML = `
+                <div class="card-image" style="background-image: url('${escapeHtml(art)}')">
+                    <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+                </div>
+                <div class="card-title">${escapeHtml(pl.name)}</div>
+                <div class="card-desc">${pl.tracks.length} songs</div>
+            `;
+            card.onclick = () => showPlaylist(index);
+            grid.appendChild(card);
+        });
+    }
+
+    function renderLikedPreview(parent) {
+        const preview = likedSongs.slice(0, 8).map(ls => ({
+            id: ls.id,
+            name: ls.trackName,
+            artist: ls.artist,
+            album: ls.album,
+            duration: ls.duration,
+            url: ls.url,
+            art: ls.art || DEFAULT_ART_URL,
+            isAudius: ls.isAudius
+        })).filter(t => t.url);
+
+        if (!preview.length) return;
+
+        const section = document.createElement('section');
+        section.className = 'home-section';
+        const head = document.createElement('div');
+        head.className = 'home-section-head';
+        head.innerHTML = `
+            <div>
+                <h3 class="home-section-title">Liked songs</h3>
+                <p class="home-section-sub">Your favorites</p>
+            </div>
+        `;
+        const seeAll = document.createElement('button');
+        seeAll.type = 'button';
+        seeAll.className = 'home-section-link';
+        seeAll.textContent = 'See all';
+        seeAll.onclick = () => {
+            const item = document.querySelector('.liked-songs-item');
+            if (item) item.click();
+            else showLikedSongs();
+        };
+        head.appendChild(seeAll);
+        section.appendChild(head);
+
+        const grid = document.createElement('div');
+        grid.className = 'home-section-grid card-grid';
+        const plIndex = upsertTempPlaylist('home_liked_preview', 'Liked songs', preview);
+        preview.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx)));
+        section.appendChild(grid);
+        parent.appendChild(section);
+    }
+
+    async function renderHome() {
         state.currentView = 'home';
         searchContainer.style.display = 'none';
         viewHeader.style.display = 'block';
         greetingEl.style.display = 'block';
-        if (exploreHero) exploreHero.style.display = 'flex';
-        if (categoryChips) categoryChips.style.display = 'flex';
+        if (exploreHero) exploreHero.style.display = 'none';
+        if (categoryChips) categoryChips.style.display = 'none';
 
-        // Dynamic Title based on Page
         const isExplore = ppRoutes().isExplorePage();
-        
+
         if (isExplore) {
             window.renderExplore = renderExplore;
             const activeChip = document.querySelector('.chip.active');
@@ -1146,56 +1381,39 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        sectionTitleEl.textContent = 'Your Collection';
         header.style.backgroundColor = 'transparent';
-
         const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
+        const isLoggedIn = !!savedUser.isLoggedIn;
 
-        if (!savedUser.isLoggedIn) {
-            greetingEl.textContent = "Welcome to PalmPlay";
-            cardGrid.innerHTML = `
-                <div style="color:var(--text-subdued); padding:60px 40px; background: radial-gradient(circle at top left, rgba(255,0,0,0.1), transparent); border-radius:16px; border: 1px solid rgba(255,255,255,0.05); grid-column: 1/-1; text-align:center;">
-                    <h2 style="color:white; margin-bottom:16px; font-size:42px; font-weight:800; letter-spacing:-1.5px;">Your personal music hub.</h2>
-                    <p style="font-size:18px; margin-bottom:40px; max-width:600px; margin-left:auto; margin-right:auto;">Log in or sign up to access your saved playlists, local tracks, and personalized premium vibes.</p>
-                    <div style="display:flex; justify-content:center; gap:20px;">
-                        <button onclick="window.PalmPlayRoutes.go('login')" class="upgrade-btn" style="padding: 16px 40px; font-size:16px;">Log In</button>
-                        <button onclick="window.PalmPlayRoutes.go('signup')" class="upgrade-btn" style="background:transparent; border:1px solid white; color:white; padding: 16px 40px; font-size:16px;">Sign Up</button>
-                    </div>
-                </div>
-            `;
-            return;
-        }
+        greetingEl.textContent = isLoggedIn
+            ? `${getRandomWish()}, ${savedUser.name || 'Listener'}`
+            : 'Welcome to PalmPlay';
+        if (sectionTitleEl) sectionTitleEl.textContent = 'Listen now';
 
-        if (isExplore) {
-            greetingEl.textContent = `Explore the Treat to Your Ears, ${savedUser.name}`;
-        } else {
-            greetingEl.textContent = `${getRandomWish()}, ${savedUser.name}`;
-        }
+        cardGrid.className = 'card-grid home-feed';
+        cardGrid.style.display = 'block';
+        cardGrid.innerHTML = `<div class="home-loading">${skeletonCardGrid(6)}</div>`;
+
+        const feed = await fetchHomeFeed();
+        if (state.currentView !== 'home') return;
+
+        const history = getPlayHistory().slice(0, 12);
         cardGrid.innerHTML = '';
-        cardGrid.style.display = 'grid'; // Ensure grid layout
-        playlists.forEach((pl, index) => {
-            const card = document.createElement('div');
-            card.className = 'card';
-            card.innerHTML = `
-                <div class="card-image" style="background-image: url(${pl.tracks[0]?.art})">
-                    <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
-                </div>
-                <div class="card-title">${pl.name}</div>
-                <div class="card-desc">${pl.tracks.length} songs</div>
-            `;
-            card.onclick = () => showPlaylist(index);
-            cardGrid.appendChild(card);
-        });
 
-        if (playlists.length === 0) {
-            cardGrid.innerHTML = `
-                <div style="color:var(--text-subdued); padding:40px; background: rgba(255,255,255,0.02); border-radius:12px; border: 1px dashed rgba(255,255,255,0.1); grid-column: 1/-1;">
-                    <h3 style="color:white; margin-bottom:16px; font-size:20px;">Start your collection in 3 easy steps:</h3>
-                    <p style="margin-bottom:12px;"><strong>Step 1:</strong> Click the <strong><i class="fas fa-plus"></i></strong> icon in the sidebar.</p>
-                    <p style="margin-bottom:12px;"><strong>Step 2:</strong> Select <strong>"Add Folder"</strong> to choose your music directory.</p>
-                    <p><strong>Step 3:</strong> Your songs will automatically appear here with metadata!</p>
-                </div>
-            `;
+        if (!isLoggedIn) renderHomeLoginBanner(cardGrid);
+
+        if (history.length) {
+            renderTrackRow(cardGrid, 'Continue listening', 'Pick up where you left off', history, 'home_continue');
+        }
+
+        renderTrackRow(cardGrid, 'Trending now', 'Popular on PalmPlay', feed.trending, 'home_trending');
+        renderTrackRow(cardGrid, 'Fresh picks', 'Curated for you', feed.picks, 'home_picks');
+
+        renderHomeQuickActions(cardGrid);
+
+        if (isLoggedIn) {
+            renderLikedPreview(cardGrid);
+            renderHomeLibrarySection(cardGrid, savedUser);
         }
     }
 
@@ -1446,6 +1664,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updatePlayerUI();
         document.body.classList.add('player-expanded');
         window.dispatchEvent(new CustomEvent('palmplay:trackchange', { detail: { plIndex, tIndex } }));
+        recordPlayHistory(track);
 
         // ── Dynamic Theme from Album Art ────────────────────────────────────────
         applyDynamicTheme(track.art);
@@ -1665,7 +1884,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchAudiusCatalogFallback(query, limit = 30) {
         try {
             const q = (query || '').trim();
-            const useTrending = /^latest\s+hits$/i.test(q) || q.length < 2;
+            const useTrending = /^latest\s+hits$/i.test(q) || /^trending$/i.test(q) || q.length < 2;
             const url = useTrending
                 ? `${AUDIUS_HOST}/v1/tracks/trending?app_name=${AUDIUS_APP_NAME}&limit=${limit}`
                 : `${AUDIUS_HOST}/v1/tracks/search?query=${encodeURIComponent(q)}&app_name=${AUDIUS_APP_NAME}`;
@@ -2399,8 +2618,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 playlistId: playlists[plIndex]?.id || null,
                 trackIndex: tIndex,
                 isAudius: track.isAudius || false,
-                url: track.isAudius ? track.url : null,
-                artUrl: track.isAudius ? track.art : null
+                isCatalog: track.isCatalog || false,
+                url: track.url || null,
+                artUrl: track.art || null
             };
             try {
                 const newId = await db.likedSongs.add(likedData);

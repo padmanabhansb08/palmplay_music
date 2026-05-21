@@ -29,6 +29,187 @@ body.player-expanded #app {
     to { opacity: 1; transform: translateY(0); }
 }
 
+/* ─── Home feed (Gap 2) ─── */
+.card-grid.home-feed {
+    display: block;
+    gap: 0;
+}
+
+.home-loading {
+    margin-bottom: 24px;
+}
+
+.home-login-banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 20px;
+    margin-bottom: 28px;
+    border-radius: var(--border-radius-md);
+    background: linear-gradient(135deg, rgba(255, 0, 0, 0.12), rgba(255, 255, 255, 0.04));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.home-login-banner-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.home-login-banner-text strong {
+    font-size: 16px;
+    color: var(--text-base);
+}
+
+.home-login-banner-text span {
+    font-size: 13px;
+    color: var(--text-subdued);
+}
+
+.home-login-banner-actions {
+    display: flex;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.home-login-btn {
+    padding: 10px 22px !important;
+    font-size: 14px !important;
+}
+
+.home-signup-btn {
+    padding: 10px 22px !important;
+    font-size: 14px !important;
+    background: transparent !important;
+    border: 1px solid rgba(255, 255, 255, 0.35) !important;
+    color: white !important;
+}
+
+.home-section {
+    margin-bottom: 32px;
+}
+
+.home-section--compact {
+    margin-bottom: 28px;
+}
+
+.home-section-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.home-section-title {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--text-base);
+}
+
+.home-section-sub {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--text-subdued);
+}
+
+.home-section-link {
+    border: none;
+    background: transparent;
+    color: var(--text-subdued);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 0;
+}
+
+.home-section-link:hover {
+    color: var(--text-base);
+    text-decoration: underline;
+}
+
+.home-section-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 16px;
+}
+
+.home-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.home-quick-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: 500px;
+    border: 1px solid var(--glass-border);
+    background: var(--bg-highlight);
+    color: var(--text-base);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.home-quick-chip:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.home-quick-chip i {
+    color: var(--primary);
+    font-size: 13px;
+}
+
+.home-library-hint {
+    padding: 20px;
+    border-radius: var(--border-radius-md);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.home-library-hint p {
+    margin: 8px 0 0;
+    font-size: 14px;
+    color: var(--text-subdued);
+    line-height: 1.5;
+}
+
+@media (max-width: 1024px) {
+    .home-section-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .home-section-title {
+        font-size: 18px;
+    }
+
+    .home-login-banner {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .home-login-banner-actions {
+        width: 100%;
+    }
+
+    .home-login-banner-actions .upgrade-btn {
+        flex: 1;
+        text-align: center;
+    }
+}
+
 /* ─── Sidebar mobile ─── */
 .sidebar-toggle {
     display: none;
