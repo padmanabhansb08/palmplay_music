@@ -465,6 +465,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.go(prev, true);
                 return;
             }
+            if (state.currentView === 'artist' || state.currentView === 'album') {
+                this.go('search', true);
+                return;
+            }
             if (state.currentView === 'language') {
                 this.go('search', true);
                 return;
@@ -810,6 +814,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
         fileInput.onchange = (e) => handleFiles(e.target.files, false);
         folderInput.onchange = (e) => handleFiles(e.target.files, true);
+
+        cardGrid.addEventListener('click', (e) => {
+            const albumBtn = e.target.closest('[data-album-id]');
+            if (albumBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                openAlbumPage(
+                    albumBtn.getAttribute('data-album-id'),
+                    albumBtn.getAttribute('data-album-name'),
+                    albumBtn.getAttribute('data-album-art')
+                );
+                return;
+            }
+            const artistBtn = e.target.closest('[data-artist-id], [data-artist-name].meta-link, .meta-link--name');
+            if (artistBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                openArtistPage(
+                    artistBtn.getAttribute('data-artist-id') || null,
+                    artistBtn.getAttribute('data-artist-name')
+                );
+            }
+        });
 
         // Navigation Links
         const navLinks = document.querySelectorAll('.nav-item');
@@ -1286,17 +1313,309 @@ document.addEventListener('DOMContentLoaded', () => {
             artist = t.primaryArtists;
         }
 
+        const primary = Array.isArray(t.artists?.primary) ? t.artists.primary[0] : null;
+
         return {
             id: t.id,
             name: decodeHtmlEntities(t.name) || 'Unknown',
             artist: decodeHtmlEntities(artist) || 'Various Artists',
             album: decodeHtmlEntities(t.album?.name) || 'Single',
+            albumId: t.album?.id || null,
+            primaryArtistId: primary?.id || null,
             duration: parseInt(t.duration, 10) || 200,
             url: streamUrl,
             art: img,
             isCatalog: true
         };
     }
+
+    function unwrapCatalogData(data) {
+        const d = data?.data;
+        if (Array.isArray(d)) return d[0] || null;
+        return d || null;
+    }
+
+    async function fetchCatalogJson(path) {
+        if (!MUSIC_CATALOG_API_BASE) return null;
+        catalogTraffic.recordStart();
+        try {
+            const res = await fetch(`${MUSIC_CATALOG_API_BASE}${path}`, { signal: AbortSignal.timeout(10000) });
+            if (!res.ok) return null;
+            return await res.json();
+        } catch (e) {
+            console.warn('Catalog request failed:', path, e);
+            return null;
+        } finally {
+            catalogTraffic.recordEnd();
+        }
+    }
+
+    function parseAlbumStub(a) {
+        if (!a?.id) return null;
+        return {
+            id: a.id,
+            name: decodeHtmlEntities(a.name || a.title) || 'Album',
+            art: pickMediaUrl(a.image) || DEFAULT_ART_URL,
+            songCount: a.songCount || a.songs?.length || null
+        };
+    }
+
+    async function fetchCatalogArtist(artistId, artistName) {
+        const name = (artistName || 'Artist').trim();
+        if (!MUSIC_CATALOG_API_BASE || !artistId) {
+            const songs = await fetchCatalogTracks(name, 30);
+            return { id: artistId, name, art: songs[0]?.art || DEFAULT_ART_URL, songs, albums: [] };
+        }
+
+        let root = unwrapCatalogData(await fetchCatalogJson(`/artists/${encodeURIComponent(artistId)}`));
+        if (!root?.topSongs && !root?.songs) {
+            const songsPayload = unwrapCatalogData(await fetchCatalogJson(`/artists/${encodeURIComponent(artistId)}/songs`));
+            if (songsPayload) {
+                root = { ...root, songs: songsPayload.songs || songsPayload.topSongs || songsPayload };
+            }
+        }
+
+        let songs = (root?.topSongs || root?.songs || [])
+            .map(parseCatalogSong)
+            .filter(Boolean);
+        const albums = (root?.topAlbums || root?.albums || [])
+            .map(parseAlbumStub)
+            .filter(Boolean);
+
+        if (!songs.length) {
+            songs = await fetchCatalogTracks(name, 30);
+        }
+
+        return {
+            id: artistId,
+            name: decodeHtmlEntities(root?.name) || name,
+            art: pickMediaUrl(root?.image) || songs[0]?.art || DEFAULT_ART_URL,
+            songs,
+            albums
+        };
+    }
+
+    async function fetchCatalogAlbum(albumId, albumName) {
+        const name = (albumName || 'Album').trim();
+        if (!MUSIC_CATALOG_API_BASE || !albumId) {
+            const songs = await fetchCatalogTracks(name, 25);
+            return {
+                id: albumId,
+                name,
+                art: songs[0]?.art || DEFAULT_ART_URL,
+                artist: songs[0]?.artist || '',
+                songs
+            };
+        }
+
+        const root = unwrapCatalogData(await fetchCatalogJson(`/albums/${encodeURIComponent(albumId)}`));
+        let songs = (root?.songs || []).map(parseCatalogSong).filter(Boolean);
+        if (!songs.length) {
+            songs = await fetchCatalogTracks(name, 25);
+        }
+
+        let artistLabel = '';
+        if (typeof root?.primaryArtists === 'string') artistLabel = root.primaryArtists;
+        else if (Array.isArray(root?.artists?.primary)) {
+            artistLabel = root.artists.primary.map(a => a?.name).filter(Boolean).join(', ');
+        }
+
+        return {
+            id: albumId,
+            name: decodeHtmlEntities(root?.name) || name,
+            art: pickMediaUrl(root?.image) || songs[0]?.art || DEFAULT_ART_URL,
+            artist: decodeHtmlEntities(artistLabel) || songs[0]?.artist || '',
+            year: root?.year || null,
+            songs
+        };
+    }
+
+    function showDetailChrome(breadcrumbLabel, title) {
+        if (searchContainer) searchContainer.style.display = 'flex';
+        if (viewHeader) viewHeader.style.display = 'block';
+        if (greetingEl) {
+            greetingEl.style.display = 'block';
+            greetingEl.className = 'greeting detail-breadcrumb';
+            greetingEl.innerHTML = breadcrumbLabel;
+        }
+        if (exploreHero) exploreHero.style.display = 'none';
+        if (categoryChips) categoryChips.style.display = 'none';
+        if (sectionTitleEl) sectionTitleEl.textContent = title;
+        header.style.backgroundColor = 'transparent';
+    }
+
+    function buildTrackMetaLine(track) {
+        const artistName = track.artist || 'Unknown';
+        const aid = track.primaryArtistId || track.artistId || null;
+        const albumName = track.album && track.album !== 'Single' && track.album !== 'Stream' && track.album !== 'Explore'
+            ? track.album
+            : '';
+        const albId = track.albumId || null;
+
+        let artistPart;
+        if (aid) {
+            artistPart = `<button type="button" class="meta-link" data-artist-id="${escapeHtml(String(aid))}" data-artist-name="${escapeHtml(artistName)}">${escapeHtml(artistName)}</button>`;
+        } else {
+            artistPart = `<button type="button" class="meta-link meta-link--name" data-artist-name="${escapeHtml(artistName)}">${escapeHtml(artistName)}</button>`;
+        }
+
+        if (!albumName) return artistPart;
+        if (albId) {
+            return `${artistPart}<span class="meta-sep"> · </span><button type="button" class="meta-link" data-album-id="${escapeHtml(String(albId))}" data-album-name="${escapeHtml(albumName)}" data-album-art="${escapeHtml(track.art || '')}">${escapeHtml(albumName)}</button>`;
+        }
+        return `${artistPart}<span class="meta-sep"> · </span><span class="meta-album">${escapeHtml(albumName)}</span>`;
+    }
+
+    async function renderArtistPage(artistId, artistName) {
+        state.currentView = 'artist';
+        showDetailChrome(
+            `<button type="button" class="crumb-link" data-crumb="discover">Discover</button><span class="crumb-sep"> › </span><span>Artist</span>`,
+            artistName || 'Artist'
+        );
+
+        cardGrid.className = 'card-grid detail-page';
+        cardGrid.style.display = 'block';
+        cardGrid.innerHTML = `<div class="detail-loading">${skeletonCardGrid(8)}</div>`;
+
+        const data = await fetchCatalogArtist(artistId, artistName);
+        if (state.currentView !== 'artist') return;
+
+        cardGrid.innerHTML = '';
+
+        const hero = document.createElement('section');
+        hero.className = 'detail-hero';
+        hero.innerHTML = `
+            <div class="detail-hero-art" style="background-image:url('${escapeHtml(data.art)}')"></div>
+            <div class="detail-hero-info">
+                <span class="detail-hero-type">Artist</span>
+                <h1 class="detail-hero-title">${escapeHtml(data.name)}</h1>
+                <p class="detail-hero-meta">${data.songs.length} top songs${data.albums.length ? ` · ${data.albums.length} albums` : ''}</p>
+            </div>
+        `;
+        cardGrid.appendChild(hero);
+
+        if (data.albums.length) {
+            const albSection = document.createElement('section');
+            albSection.className = 'detail-section';
+            albSection.innerHTML = `<h3 class="detail-section-title">Albums</h3>`;
+            const albGrid = document.createElement('div');
+            albGrid.className = 'detail-albums-row';
+            data.albums.forEach((alb) => {
+                const card = document.createElement('button');
+                card.type = 'button';
+                card.className = 'detail-album-card';
+                card.innerHTML = `
+                    <div class="detail-album-art" style="background-image:url('${escapeHtml(alb.art)}')"></div>
+                    <span class="detail-album-name">${escapeHtml(alb.name)}</span>
+                `;
+                card.onclick = () => openAlbumPage(alb.id, alb.name, alb.art);
+                albGrid.appendChild(card);
+            });
+            albSection.appendChild(albGrid);
+            cardGrid.appendChild(albSection);
+        }
+
+        if (!data.songs.length) {
+            showErrorState(cardGrid, {
+                icon: 'fa-user-music',
+                title: 'No songs found',
+                message: 'Try searching for this artist on Discover.',
+                onRetry: () => openArtistPage(artistId, artistName)
+            });
+            return;
+        }
+
+        const plIndex = upsertTempPlaylist(`artist_${artistId || encodeURIComponent(data.name)}`, data.name, data.songs);
+        const grid = document.createElement('div');
+        grid.className = 'home-section-grid card-grid';
+        data.songs.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx)));
+
+        const songsSection = document.createElement('section');
+        songsSection.className = 'detail-section';
+        songsSection.innerHTML = `<h3 class="detail-section-title">Popular tracks</h3>`;
+        songsSection.appendChild(grid);
+        cardGrid.appendChild(songsSection);
+
+        bindDetailBreadcrumb(cardGrid);
+        mainView.scrollTop = 0;
+    }
+
+    async function renderAlbumPage(albumId, albumName, artUrl) {
+        state.currentView = 'album';
+        showDetailChrome(
+            `<button type="button" class="crumb-link" data-crumb="discover">Discover</button><span class="crumb-sep"> › </span><span>Album</span>`,
+            albumName || 'Album'
+        );
+
+        cardGrid.className = 'card-grid detail-page';
+        cardGrid.style.display = 'block';
+        cardGrid.innerHTML = `<div class="detail-loading">${skeletonCardGrid(8)}</div>`;
+
+        const data = await fetchCatalogAlbum(albumId, albumName);
+        if (state.currentView !== 'album') return;
+
+        cardGrid.innerHTML = '';
+
+        const hero = document.createElement('section');
+        hero.className = 'detail-hero';
+        const art = artUrl || data.art || DEFAULT_ART_URL;
+        hero.innerHTML = `
+            <div class="detail-hero-art" style="background-image:url('${escapeHtml(art)}')"></div>
+            <div class="detail-hero-info">
+                <span class="detail-hero-type">Album</span>
+                <h1 class="detail-hero-title">${escapeHtml(data.name)}</h1>
+                <p class="detail-hero-meta">${escapeHtml(data.artist || '')}${data.year ? ` · ${data.year}` : ''} · ${data.songs.length} songs</p>
+                ${data.artist ? `<button type="button" class="meta-link detail-hero-artist" data-artist-name="${escapeHtml(data.artist)}">View artist</button>` : ''}
+            </div>
+        `;
+        cardGrid.appendChild(hero);
+
+        if (!data.songs.length) {
+            showErrorState(cardGrid, {
+                icon: 'fa-compact-disc',
+                title: 'No tracks found',
+                message: 'This album could not be loaded.',
+                onRetry: () => openAlbumPage(albumId, albumName, art)
+            });
+            return;
+        }
+
+        const plIndex = upsertTempPlaylist(`album_${albumId || encodeURIComponent(data.name)}`, data.name, data.songs);
+        const grid = document.createElement('div');
+        grid.className = 'home-section-grid card-grid';
+        data.songs.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx)));
+
+        const trackSection = document.createElement('section');
+        trackSection.className = 'detail-section';
+        trackSection.innerHTML = `<h3 class="detail-section-title">Tracks</h3>`;
+        trackSection.appendChild(grid);
+        cardGrid.appendChild(trackSection);
+
+        bindDetailBreadcrumb(cardGrid);
+        mainView.scrollTop = 0;
+    }
+
+    function bindDetailBreadcrumb(root) {
+        root.querySelectorAll('[data-crumb="discover"]').forEach((btn) => {
+            btn.onclick = () => window.PalmPlayNav.go('search');
+        });
+        root.querySelectorAll('.detail-hero-artist[data-artist-name]').forEach((btn) => {
+            btn.onclick = () => openArtistPage(null, btn.getAttribute('data-artist-name'));
+        });
+    }
+
+    function openArtistPage(artistId, artistName) {
+        PalmPlayNav.push(state.currentView);
+        renderArtistPage(artistId, artistName);
+    }
+
+    function openAlbumPage(albumId, albumName, artUrl) {
+        PalmPlayNav.push(state.currentView);
+        renderAlbumPage(albumId, albumName, artUrl);
+    }
+
+    window.openArtistPage = openArtistPage;
+    window.openAlbumPage = openAlbumPage;
 
     async function fetchCatalogSongById(id) {
         if (!MUSIC_CATALOG_API_BASE || !id) return null;
@@ -1740,9 +2059,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
             </div>
             <div class="card-title">${escapeHtml(track.name)}</div>
-            <div class="card-desc">${escapeHtml(track.artist)}</div>
+            <div class="card-desc">${buildTrackMetaLine(track)}</div>
         `;
-        card.onclick = () => playTrack(plIndex, tIdx);
+        card.onclick = (e) => {
+            if (e.target.closest('.meta-link, .card-more-btn')) return;
+            playTrack(plIndex, tIdx);
+        };
         attachCardActions(card, track, plIndex, tIdx);
         return card;
     }
@@ -1912,6 +2234,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const savedUser = JSON.parse(localStorage.getItem('palmplay_user') || '{}');
         const isLoggedIn = !!savedUser.isLoggedIn;
 
+        greetingEl.className = 'greeting';
         greetingEl.textContent = isLoggedIn
             ? `${getRandomWish()}, ${savedUser.name || 'Listener'}`
             : 'Welcome to PalmPlay';
@@ -2474,31 +2797,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             return results.map(t => {
-                const img = pickMediaUrl(t.image) || DEFAULT_ART_URL;
-                const streamUrl = pickMediaUrl(t.downloadUrl);
-
-                let artist = '';
-                if (Array.isArray(t.artists?.primary) && t.artists.primary.length > 0) {
-                    artist = t.artists.primary.map(a => a?.name).filter(Boolean).join(', ');
-                } else if (Array.isArray(t.artists?.all) && t.artists.all.length > 0) {
-                    artist = t.artists.all.map(a => a?.name).filter(Boolean).join(', ');
-                } else if (typeof t.primaryArtists === 'string') {
-                    artist = t.primaryArtists;
-                }
-
+                const parsed = parseCatalogSong(t);
+                if (!parsed) return null;
                 return {
-                    id: t.id,
-                    name: decodeHtmlEntities(t.name) || 'Unknown',
-                    artist: decodeHtmlEntities(artist) || 'Various Artists',
-                    album: decodeHtmlEntities(t.album?.name) || 'Single',
-                    duration: parseInt(t.duration) || 200,
+                    ...parsed,
                     language: t.language || '',
-                    plays: Math.floor(Math.random() * 50000) + 10000,
-                    url: streamUrl,
-                    art: img,
-                    isCatalog: true
+                    plays: Math.floor(Math.random() * 50000) + 10000
                 };
-            }).filter(t => t.url);
+            }).filter(Boolean);
         } catch (e) {
             console.error('Catalog fetch failed:', e);
             catalogTraffic._enterFallback(Date.now());
@@ -3078,7 +3384,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const playsLabel = track.plays > 0
                                 ? `${(track.plays / 1000).toFixed(0)}K plays`
                                 : track.album;
-                            desc.innerHTML = `${escapeHtml(track.artist)} · <span style="color:var(--primary)">${escapeHtml(playsLabel)}</span>`;
+                            desc.innerHTML = `${buildTrackMetaLine(track)}<span class="meta-sep"> · </span><span class="meta-plays">${escapeHtml(playsLabel)}</span>`;
                         }
                         audiusGrid.appendChild(card);
                     });
