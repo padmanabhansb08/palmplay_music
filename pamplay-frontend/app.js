@@ -114,6 +114,11 @@ db.version(3).stores({
     // Migration: nothing to migrate, new table
     console.log('Upgraded to DB version 3 with likedSongs store');
 });
+db.version(4).stores({
+    playlists: "++id, userId, name",
+    tracks: "++id, userId, playlistId, source, externalId, name, artist",
+    likedSongs: "++id, userId, trackName, artist"
+});
 
 /** @returns {typeof window.PalmPlayRoutes} */
 function ppRoutes() {
@@ -209,6 +214,8 @@ function showModal(title, message, onConfirm, showInput = false, defaultValue = 
 
     titleEl.textContent = title;
     messageEl.textContent = message;
+
+    if (confirmBtn) confirmBtn.style.display = '';
 
     if (showInput) {
         inputEl.style.display = 'block';
@@ -569,20 +576,35 @@ document.addEventListener('DOMContentLoaded', () => {
             for (const pl of savedPlaylists) {
                 const plTracks = await db.tracks.where('playlistId').equals(pl.id).toArray();
 
-                // Recreate blob URLs for each track and compute missing durations
                 const tracksWithUrls = [];
                 for (const t of plTracks) {
-                    const url = URL.createObjectURL(t.audioBlob);
+                    let url = null;
+                    let art = DEFAULT_ART_URL;
+
+                    if (t.audioBlob) {
+                        url = URL.createObjectURL(t.audioBlob);
+                        art = t.artBlob ? URL.createObjectURL(t.artBlob) : DEFAULT_ART_URL;
+                    } else if (t.streamUrl) {
+                        url = t.streamUrl;
+                        art = t.artUrl || DEFAULT_ART_URL;
+                    } else {
+                        continue;
+                    }
+
                     let duration = t.duration || 0;
-                    // Compute duration if not stored
                     if (!duration && t.audioBlob) {
                         duration = await getAudioDuration(t.audioBlob);
                     }
+
                     tracksWithUrls.push({
                         ...t,
+                        id: t.externalId || t.id,
                         url,
                         duration,
-                        art: t.artBlob ? URL.createObjectURL(t.artBlob) : DEFAULT_ART_URL
+                        art,
+                        isCatalog: t.source === 'catalog',
+                        isAudius: t.source === 'audius',
+                        isCatalogFallback: t.source === 'audius'
                     });
                 }
 
@@ -774,6 +796,17 @@ document.addEventListener('DOMContentLoaded', () => {
         // File/Folder Picking
         addFilesBtn.onclick = () => fileInput.click();
         addFolderBtn.onclick = () => folderInput.click();
+
+        const newPlaylistBtn = document.querySelector('#new-playlist-btn');
+        if (newPlaylistBtn) {
+            newPlaylistBtn.onclick = (e) => {
+                e.stopPropagation();
+                addOptions.style.display = 'none';
+                showModal('New playlist', 'Name your playlist:', async (name) => {
+                    await createUserPlaylist(name);
+                }, true, '');
+            };
+        }
 
         fileInput.onchange = (e) => handleFiles(e.target.files, false);
         folderInput.onchange = (e) => handleFiles(e.target.files, true);
@@ -1130,10 +1163,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Then render user playlists
         playlists.forEach((pl, index) => {
+            if (!isUserPlaylist(pl)) return;
             const item = document.createElement('a');
             item.href = '#';
             item.className = 'playlist-item';
-            item.innerHTML = `<i class="fas fa-music" style="margin-right:8px; opacity:0.7"></i> ${pl.name}`;
+            item.innerHTML = `<i class="fas fa-music" style="margin-right:8px; opacity:0.7"></i> ${escapeHtml(pl.name)} <span class="liked-count">${pl.tracks.length}</span>`;
             item.onclick = (e) => {
                 e.preventDefault();
                 showPlaylist(index);
@@ -1485,6 +1519,218 @@ document.addEventListener('DOMContentLoaded', () => {
         return data;
     }
 
+    function getSavedUser() {
+        return JSON.parse(localStorage.getItem('palmplay_user') || '{}');
+    }
+
+    function normalizeStreamTrack(track) {
+        return {
+            id: track.id ?? track.externalId ?? null,
+            name: track.name || 'Unknown',
+            artist: track.artist || 'Unknown',
+            album: track.album || 'Single',
+            duration: track.duration || 0,
+            url: track.url || track.streamUrl || null,
+            art: track.art || track.artUrl || DEFAULT_ART_URL,
+            isCatalog: !!(track.isCatalog || track.source === 'catalog'),
+            isAudius: !!(track.isAudius || track.source === 'audius'),
+            isCatalogFallback: !!track.isCatalogFallback
+        };
+    }
+
+    function getTrackSource(track) {
+        if (track.audioBlob) return 'local';
+        if (track.isCatalog || track.source === 'catalog') return 'catalog';
+        if (track.isAudius || track.source === 'audius') return 'audius';
+        return 'stream';
+    }
+
+    function isUserPlaylist(pl) {
+        return pl && !pl.isTemporary && typeof pl.id === 'number';
+    }
+
+    function trackExistsInPlaylist(pl, track) {
+        const norm = normalizeStreamTrack(track);
+        return pl.tracks.some((t) => {
+            if (norm.id && t.id && String(t.id) === String(norm.id)) {
+                const src = getTrackSource(t);
+                const ns = getTrackSource(norm);
+                if (src === ns || (src !== 'local' && ns !== 'local')) return true;
+            }
+            return t.name === norm.name && t.artist === norm.artist;
+        });
+    }
+
+    async function createUserPlaylist(name) {
+        const user = getSavedUser();
+        if (!user.email) {
+            showToast('Log in to create playlists', 'fa-user-lock');
+            ppRoutes().go('login');
+            return -1;
+        }
+        const trimmed = (name || '').trim();
+        if (!trimmed) return -1;
+
+        const plId = await db.playlists.add({
+            name: trimmed,
+            userId: user.email,
+            updatedAt: new Date().toISOString()
+        });
+        playlists.push({ id: plId, name: trimmed, tracks: [] });
+        renderSidebar();
+        showToast(`Playlist "${trimmed}" created`, 'fa-list');
+        return playlists.length - 1;
+    }
+
+    async function addTrackToUserPlaylist(plIndex, rawTrack) {
+        const user = getSavedUser();
+        if (!user.email) {
+            showToast('Log in to save to playlists', 'fa-user-lock');
+            ppRoutes().go('login');
+            return false;
+        }
+
+        const pl = playlists[plIndex];
+        if (!isUserPlaylist(pl)) return false;
+
+        const track = normalizeStreamTrack(rawTrack);
+        if (!track.url) {
+            showToast('This track cannot be saved (no stream URL)', 'fa-exclamation-triangle');
+            return false;
+        }
+
+        if (trackExistsInPlaylist(pl, track)) {
+            showToast(`Already in "${pl.name}"`, 'fa-info-circle');
+            return false;
+        }
+
+        const source = getTrackSource(track);
+        const dbId = await db.tracks.add({
+            userId: user.email,
+            playlistId: pl.id,
+            source,
+            externalId: track.id ? String(track.id) : null,
+            name: track.name,
+            artist: track.artist,
+            album: track.album,
+            duration: track.duration,
+            streamUrl: track.url,
+            artUrl: track.art,
+            dateAdded: new Date().toISOString()
+        });
+
+        pl.tracks.push({
+            ...track,
+            dbId,
+            source
+        });
+
+        await db.playlists.update(pl.id, { updatedAt: new Date().toISOString() });
+        showToast(`Added to "${pl.name}"`, 'fa-plus-circle');
+        renderSidebar();
+        if (state.currentView === 'home') renderHome();
+        return true;
+    }
+
+    let modalConfirmPrevDisplay = '';
+
+    function closePlaylistPickerModal() {
+        const container = document.getElementById('modal-container');
+        const confirmBtn = document.getElementById('modal-confirm');
+        const messageEl = document.getElementById('modal-message');
+        if (confirmBtn) confirmBtn.style.display = modalConfirmPrevDisplay || '';
+        if (messageEl) messageEl.innerHTML = '';
+        if (container) container.style.display = 'none';
+    }
+
+    function showAddToPlaylistPicker(rawTrack) {
+        const track = normalizeStreamTrack(rawTrack);
+        const user = getSavedUser();
+        if (!user.email) {
+            showToast('Log in to save playlists', 'fa-user-lock');
+            ppRoutes().go('login');
+            return;
+        }
+
+        const container = document.getElementById('modal-container');
+        const titleEl = document.getElementById('modal-title');
+        const messageEl = document.getElementById('modal-message');
+        const inputEl = document.getElementById('modal-input');
+        const confirmBtn = document.getElementById('modal-confirm');
+        const cancelBtn = document.getElementById('modal-cancel');
+
+        if (!container || !messageEl) return;
+
+        modalConfirmPrevDisplay = confirmBtn?.style.display || '';
+        if (confirmBtn) confirmBtn.style.display = 'none';
+        if (inputEl) inputEl.style.display = 'none';
+
+        titleEl.textContent = 'Add to playlist';
+        messageEl.innerHTML = '';
+
+        const sub = document.createElement('p');
+        sub.className = 'playlist-picker-track';
+        sub.textContent = `${track.name} — ${track.artist}`;
+        messageEl.appendChild(sub);
+
+        const list = document.createElement('div');
+        list.className = 'playlist-picker-list';
+
+        const userPls = playlists.filter(isUserPlaylist);
+        if (!userPls.length) {
+            const empty = document.createElement('p');
+            empty.className = 'playlist-picker-empty';
+            empty.textContent = 'No playlists yet. Create one below.';
+            messageEl.appendChild(empty);
+        }
+
+        userPls.forEach((pl) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'playlist-picker-item';
+            btn.innerHTML = `<i class="fas fa-music"></i><span>${escapeHtml(pl.name)}</span><small>${pl.tracks.length} tracks</small>`;
+            btn.onclick = async () => {
+                const idx = playlists.findIndex(p => p.id === pl.id);
+                await addTrackToUserPlaylist(idx, track);
+                closePlaylistPickerModal();
+            };
+            list.appendChild(btn);
+        });
+
+        const newBtn = document.createElement('button');
+        newBtn.type = 'button';
+        newBtn.className = 'playlist-picker-item playlist-picker-new';
+        newBtn.innerHTML = '<i class="fas fa-plus"></i><span>New playlist</span>';
+        newBtn.onclick = () => {
+            closePlaylistPickerModal();
+            showModal('New playlist', 'Choose a name:', async (name) => {
+                const idx = await createUserPlaylist(name);
+                if (idx >= 0) await addTrackToUserPlaylist(idx, track);
+            }, true, '');
+        };
+        list.appendChild(newBtn);
+        messageEl.appendChild(list);
+
+        cancelBtn.onclick = () => closePlaylistPickerModal();
+        container.style.display = 'flex';
+    }
+
+    window.showAddToPlaylistPicker = showAddToPlaylistPicker;
+
+    function attachCardActions(card, track, plIndex, tIdx) {
+        card.classList.add('card--has-menu');
+        const menu = document.createElement('button');
+        menu.type = 'button';
+        menu.className = 'card-more-btn';
+        menu.setAttribute('aria-label', 'Song options');
+        menu.innerHTML = '<i class="fas fa-ellipsis-h"></i>';
+        menu.onclick = (e) => {
+            e.stopPropagation();
+            showAddToPlaylistPicker(track);
+        };
+        card.appendChild(menu);
+    }
+
     function createTrackCard(track, plIndex, tIdx) {
         const card = document.createElement('div');
         card.className = 'card audius-card';
@@ -1497,6 +1743,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="card-desc">${escapeHtml(track.artist)}</div>
         `;
         card.onclick = () => playTrack(plIndex, tIdx);
+        attachCardActions(card, track, plIndex, tIdx);
         return card;
     }
 
@@ -1568,7 +1815,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderHomeLibrarySection(parent, savedUser) {
-        const userPlaylists = playlists.filter(pl => !pl.isTemporary && pl.tracks?.length);
+        const userPlaylists = playlists.filter(pl => isUserPlaylist(pl) && pl.tracks?.length);
         if (userPlaylists.length === 0) {
             const empty = document.createElement('section');
             empty.className = 'home-section home-library-hint';
@@ -1583,7 +1830,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const grid = appendHomeSection(parent, 'Your playlists', `${userPlaylists.length} on this device`);
         grid.style.display = 'grid';
         playlists.forEach((pl, index) => {
-            if (pl.isTemporary || !pl.tracks?.length) return;
+            if (!isUserPlaylist(pl) || !pl.tracks?.length) return;
             const card = document.createElement('div');
             card.className = 'card';
             const art = pl.tracks[0]?.art || DEFAULT_ART_URL;
@@ -1758,17 +2005,7 @@ document.addEventListener('DOMContentLoaded', () => {
             playlists[audiusPlIndex].tracks = mappedTracks;
             
             mappedTracks.forEach((track, tIdx) => {
-                const card = document.createElement('div');
-                card.className = 'card audius-card';
-                card.innerHTML = `
-                    <div class="card-image" style="background-image: url(${track.art})">
-                        <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
-                    </div>
-                    <div class="card-title">${track.name}</div>
-                    <div class="card-desc">${track.artist}</div>
-                `;
-                card.onclick = () => playTrack(audiusPlIndex, tIdx);
-                cardGrid.appendChild(card);
+                cardGrid.appendChild(createTrackCard(track, audiusPlIndex, tIdx));
             });
             
         } catch (err) {
@@ -2397,6 +2634,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="card-desc">${track.artist}</div>
             `;
             card.onclick = () => playTrack(track.plIdx, track.tIdx);
+            attachCardActions(card, track, track.plIdx, track.tIdx);
             localGrid.appendChild(card);
         });
         localSection.appendChild(localGrid);
@@ -2501,19 +2739,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 trendGrid.innerHTML = '';
                 tracks.forEach((track, tIdx) => {
-                    const card = document.createElement('div');
-                    card.className = 'card';
-                    const playsLabel = track.plays > 0 ? `${(track.plays / 1000).toFixed(0)}K` : '';
-                    card.innerHTML = `
-                        <div class="card-image" style="background-image: url(${track.art})">
-                            <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
-                            ${playsLabel ? `<span class="plays-badge"><i class="fas fa-headphones" style="margin-right:4px"></i>${playsLabel}</span>` : ''}
-                        </div>
-                        <div class="card-title">${track.name}</div>
-                        <div class="card-desc">${track.artist}</div>
-                    `;
-                    card.onclick = () => playTrack(trendPlIndex, tIdx);
-                    trendGrid.appendChild(card);
+                    trendGrid.appendChild(createTrackCard(track, trendPlIndex, tIdx));
                 });
             } catch(e) {
                 trendGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Couldn\'t load trending tracks.</p>';
@@ -2698,19 +2924,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         resultsGrid.innerHTML = '';
                         tracks.forEach((track, tIdx) => {
-                            const card = document.createElement('div');
-                            card.className = 'card';
-                            const playsLabel = track.plays > 0 ? `${(track.plays / 1000).toFixed(0)}K` : '';
-                            card.innerHTML = `
-                                <div class="card-image" style="background-image: url(${track.art})">
-                                    <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
-                                    ${playsLabel ? `<span class="plays-badge"><i class="fas fa-headphones" style="margin-right:4px"></i>${playsLabel}</span>` : ''}
-                                </div>
-                                <div class="card-title">${track.name}</div>
-                                <div class="card-desc">${track.artist}</div>
-                            `;
-                            card.onclick = () => playTrack(plIdx, tIdx);
-                            resultsGrid.appendChild(card);
+                            resultsGrid.appendChild(createTrackCard(track, plIdx, tIdx));
                         });
                     } catch (err) {
                         resultsGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Error loading tracks.</p>';
@@ -2749,17 +2963,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 grid.innerHTML = '';
                 tracks.forEach((track, tIdx) => {
                     const card = document.createElement('div');
-                    card.className = 'lang-track-card';
+                    card.className = 'lang-track-card card--has-menu';
                     const playsLabel = track.plays > 0 ? `${(track.plays / 1000).toFixed(0)}K` : '';
                     card.innerHTML = `
-                        <div class="lang-track-art" style="background-image: url(${track.art})">
+                        <div class="lang-track-art" style="background-image: url('${escapeHtml(track.art)}')">
                             <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
                             ${playsLabel ? `<span class="plays-badge"><i class="fas fa-headphones" style="margin-right:3px"></i>${playsLabel}</span>` : ''}
                         </div>
-                        <div class="lang-track-name">${track.name}</div>
-                        <div class="lang-track-artist">${track.artist}</div>
+                        <div class="lang-track-name">${escapeHtml(track.name)}</div>
+                        <div class="lang-track-artist">${escapeHtml(track.artist)}</div>
                     `;
                     card.onclick = () => playTrack(plIdx, tIdx);
+                    attachCardActions(card, track, plIdx, tIdx);
                     grid.appendChild(card);
                 });
 
@@ -2857,19 +3072,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     audiusGrid.innerHTML = '';
                     tracks.forEach((track, tIdx) => {
-                        const card = document.createElement('div');
-                        card.className = 'card';
-                        const playsLabel = track.plays > 0
-                            ? `${(track.plays / 1000).toFixed(0)}K plays`
-                            : track.album;
-                        card.innerHTML = `
-                            <div class="card-image" style="background-image: url(${track.art})">
-                                <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
-                            </div>
-                            <div class="card-title">${track.name}</div>
-                            <div class="card-desc">${track.artist} · <span style="color:var(--primary)">${playsLabel}</span></div>
-                        `;
-                        card.onclick = () => playTrack(audiusPlIndex, tIdx);
+                        const card = createTrackCard(track, audiusPlIndex, tIdx);
+                        const desc = card.querySelector('.card-desc');
+                        if (desc) {
+                            const playsLabel = track.plays > 0
+                                ? `${(track.plays / 1000).toFixed(0)}K plays`
+                                : track.album;
+                            desc.innerHTML = `${escapeHtml(track.artist)} · <span style="color:var(--primary)">${escapeHtml(playsLabel)}</span>`;
+                        }
                         audiusGrid.appendChild(card);
                     });
                     

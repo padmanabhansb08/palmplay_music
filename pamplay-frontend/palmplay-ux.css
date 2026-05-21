@@ -757,6 +757,115 @@ body.player-expanded .player-bar {
     border-color: rgba(255, 0, 0, 0.35);
 }
 
+/* ─── Add to playlist (Gap 3) ─── */
+.card--has-menu,
+.lang-track-card.card--has-menu {
+    position: relative;
+}
+
+.card-more-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 5;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s ease, background 0.2s ease;
+}
+
+.card:hover .card-more-btn,
+.lang-track-card:hover .card-more-btn,
+.card-more-btn:focus {
+    opacity: 1;
+}
+
+.card-more-btn:hover {
+    background: rgba(255, 0, 0, 0.85);
+}
+
+.playlist-picker-track {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: var(--text-subdued);
+    text-align: center;
+}
+
+.playlist-picker-empty {
+    font-size: 13px;
+    color: var(--text-subdued);
+    text-align: center;
+    margin: 0 0 12px;
+}
+
+.playlist-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: min(50vh, 320px);
+    overflow-y: auto;
+    margin-top: 8px;
+}
+
+.playlist-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 12px 14px;
+    border: none;
+    border-radius: var(--border-radius-sm);
+    background: var(--bg-highlight);
+    color: var(--text-base);
+    font-size: 14px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+}
+
+.playlist-picker-item i {
+    color: var(--primary);
+    width: 18px;
+    text-align: center;
+}
+
+.playlist-picker-item span {
+    flex: 1;
+    font-weight: 600;
+}
+
+.playlist-picker-item small {
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
+.playlist-picker-item:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.playlist-picker-new {
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    background: transparent;
+}
+
+.playlist-picker-new:hover {
+    border-color: var(--primary);
+    background: rgba(255, 0, 0, 0.08);
+}
+
+#custom-modal .playlist-picker-list {
+    width: 100%;
+    min-width: 260px;
+}
+
 .state-message .retry-btn {
     margin-top: 16px;
 }
