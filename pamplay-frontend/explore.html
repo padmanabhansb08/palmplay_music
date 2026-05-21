@@ -8,7 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PalmPlay - Personalized Player</title>
     <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="palmplay-ux.css">
+    <link rel="stylesheet" href="palmplay-ux.css?v=4">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
     <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
@@ -64,23 +64,26 @@
         <!-- Main Content Area -->
         <main class="main-view">
             <header class="top-header">
-                <div class="nav-controls">
-                    <button class="control-btn"><i class="fas fa-chevron-left"></i></button>
-                    <button class="control-btn"><i class="fas fa-chevron-right"></i></button>
-                    <div class="search-container premium-search header-search--always">
-                        <i class="fas fa-search search-icon"></i>
-                        <input type="text" placeholder="Search songs, artists, albums..." class="premium-search-input" aria-label="Search">
-                    </div>
+                <button type="button" class="sidebar-toggle control-btn" id="sidebar-toggle" aria-label="Open menu">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="header-history">
+                    <button type="button" class="control-btn header-back" aria-label="Back"><i class="fas fa-chevron-left"></i></button>
+                    <button type="button" class="control-btn header-fwd header-fwd--hide-mobile" aria-label="Forward"><i class="fas fa-chevron-right"></i></button>
+                </div>
+                <div class="search-container premium-search header-search--always">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" placeholder="Search songs, artists, albums..." class="premium-search-input" aria-label="Search">
                 </div>
                 <div class="user-controls">
-
-                    <button class="gesture-toggle" id="gesture-toggle" onclick="toggleGestureMode()">
+                    <button class="gesture-toggle" id="gesture-toggle" onclick="toggleGestureMode()" aria-hidden="true" tabindex="-1">
                         <i class="fas fa-hand-paper"></i>
                         <span>Gestures: OFF</span>
                     </button>
-                    <button class="profile-btn" onclick="window.location.href='login.html'"><img
-                            src="https://ui-avatars.com/api/?name=User&background=FF0000&color=fff"
-                            style="width:28px; border-radius:50%; margin-right:4px;"> User</button>
+                    <button type="button" class="profile-btn" onclick="window.location.href='login.html'">
+                        <img src="https://ui-avatars.com/api/?name=User&background=FF0000&color=fff" alt="" width="28" height="28" style="border-radius:50%">
+                        <span class="profile-btn-label">Sign In</span>
+                    </button>
                 </div>
             </header>
 
@@ -178,8 +181,8 @@
 
     <script src="catalog-config.js"></script>
     <script src="env-config.js"></script>
-    <script src="app.js?v=6"></script>
-    <script src="palmplay-ux.js?v=1"></script>
+    <script src="app.js?v=7"></script>
+    <script src="palmplay-ux.js?v=3"></script>
 </body>
 
 </html>

@@ -800,7 +800,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Back Navigation
-        const backBtn = document.querySelector('.fa-chevron-left')?.parentElement;
+        const backBtn = document.querySelector('.header-back') || document.querySelector('.top-header .fa-chevron-left')?.closest('button');
         if (backBtn) backBtn.onclick = () => window.PalmPlayNav.back();
 
         // Category Chips for Explore Page
@@ -2013,7 +2013,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <i class="fas ${moodIcons[mood] || 'fa-music'}" style="color:var(--primary); margin-right:8px;"></i>${lang.name} ${mood}
                 </h3>
                 <div class="lang-mood-scroll" id="mood-grid-${mood.replace(/[^a-zA-Z]/g, '')}">
-                    <div class="skeleton-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));">${Array(4).fill('<div class="skeleton-card"><div class="skeleton-shimmer skeleton-card-art"></div><div class="skeleton-shimmer skeleton-card-line"></div></div>').join('')}</div>
+                    ${skeletonCardGrid(4)}
                 </div>
             </div>`
         ).join('');
@@ -2047,7 +2047,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <h3 class="browse-section-title">
                         <i class="fas fa-search" style="color:var(--primary); margin-right:8px;"></i>Search Results in ${lang.name}
                     </h3>
-                    <div class="card-grid lang-search-results-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px;"></div>
+                    <div class="card-grid lang-search-results-grid"></div>
                 </div>
 
                 <div class="lang-mood-chips-row">
@@ -2069,14 +2069,26 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         }
 
-        // Mood chip click → scroll to that section
+        const setActiveLangMood = (moodName) => {
+            const safeId = 'mood-' + moodName.replace(/[^a-zA-Z]/g, '');
+            cardGrid.querySelectorAll('.lang-mood-section').forEach((sec) => {
+                sec.classList.toggle('mood-section-visible', sec.id === safeId);
+            });
+            if (window.matchMedia('(max-width: 1024px)').matches) {
+                const target = document.getElementById(safeId);
+                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        };
+
+        if (lang.moods.length > 0) {
+            setActiveLangMood(lang.moods[0]);
+        }
+
         cardGrid.querySelectorAll('.lang-mood-chip').forEach(chip => {
             chip.addEventListener('click', () => {
                 cardGrid.querySelectorAll('.lang-mood-chip').forEach(c => c.classList.remove('active'));
                 chip.classList.add('active');
-                const targetId = 'mood-' + chip.dataset.mood.replace(/[^a-zA-Z]/g, '');
-                const target = document.getElementById(targetId);
-                if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                setActiveLangMood(chip.dataset.mood);
             });
         });
 

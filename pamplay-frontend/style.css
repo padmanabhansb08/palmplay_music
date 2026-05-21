@@ -255,20 +255,35 @@ body {
 .top-header {
     position: sticky;
     top: 0;
-    height: var(--header-height);
+    height: auto;
+    min-height: var(--header-height);
     display: flex;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    justify-content: flex-start;
     align-items: center;
-    padding: 0 32px;
+    gap: 10px 12px;
+    padding: 12px 20px;
     background: rgba(0, 0, 0, 0.4);
     backdrop-filter: blur(20px);
     z-index: 100;
-    min-width: 600px;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.header-history {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
 }
 
 .nav-controls {
     display: flex;
+    align-items: center;
     gap: 12px;
+    flex: 1;
+    min-width: 0;
 }
 
 .control-btn {
@@ -1215,6 +1230,9 @@ body {
 .search-container.premium-search {
     display: flex;
     align-items: center;
+    flex: 1;
+    min-width: 0;
+    max-width: 520px;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 500px;
@@ -1587,32 +1605,19 @@ body {
     margin-bottom: 28px;
 }
 
-/* Horizontal Scroll Track Row */
+/* Track row — grid on small screens, horizontal row on desktop */
 .lang-mood-scroll {
-    display: flex;
-    gap: 16px;
-    overflow-x: auto;
-    padding-bottom: 12px;
-    scroll-behavior: smooth;
-    -webkit-overflow-scrolling: touch;
-}
-
-.lang-mood-scroll::-webkit-scrollbar {
-    height: 4px;
-}
-
-.lang-mood-scroll::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.15);
-    border-radius: 4px;
-}
-
-.lang-mood-scroll::-webkit-scrollbar-track {
-    background: transparent;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    overflow-x: hidden;
+    padding-bottom: 4px;
 }
 
 /* Individual Track Card */
 .lang-track-card {
-    flex: 0 0 160px;
+    width: 100%;
+    min-width: 0;
     cursor: pointer;
     transition: transform 0.25s ease;
 }
@@ -1622,8 +1627,9 @@ body {
 }
 
 .lang-track-art {
-    width: 160px;
-    height: 160px;
+    width: 100%;
+    aspect-ratio: 1;
+    height: auto;
     border-radius: var(--border-radius-md);
     background-size: cover;
     background-position: center;
@@ -1656,7 +1662,7 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 160px;
+    max-width: 100%;
 }
 
 .lang-track-artist {
@@ -1665,7 +1671,123 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 160px;
+    max-width: 100%;
+}
+
+/* Desktop: all moods visible, horizontal row */
+@media (min-width: 1025px) {
+    .lang-mood-section {
+        display: block !important;
+    }
+
+    .lang-mood-scroll {
+        display: flex;
+        gap: 16px;
+        overflow-x: auto;
+        scroll-behavior: smooth;
+        -webkit-overflow-scrolling: touch;
+        grid-template-columns: unset;
+    }
+
+    .lang-mood-scroll::-webkit-scrollbar {
+        height: 4px;
+    }
+
+    .lang-mood-scroll::-webkit-scrollbar-thumb {
+        background: rgba(255,255,255,0.15);
+        border-radius: 4px;
+    }
+
+    .lang-track-card {
+        flex: 0 0 160px;
+        width: auto;
+    }
+
+    .lang-track-art {
+        width: 160px;
+        height: 160px;
+        aspect-ratio: unset;
+    }
+
+    .lang-track-name,
+    .lang-track-artist {
+        max-width: 160px;
+    }
+}
+
+/* Mobile: one mood visible at a time — no endless vertical stack */
+@media (max-width: 1024px) {
+    .lang-mood-section {
+        display: none;
+        margin-bottom: 20px;
+    }
+
+    .lang-mood-section.mood-section-visible {
+        display: block;
+    }
+
+    .lang-hero {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 44px 16px 16px;
+        min-height: 0;
+        margin-bottom: 16px;
+    }
+
+    .lang-hero-script {
+        font-size: 72px;
+        right: 8px;
+        top: 40%;
+        opacity: 0.1;
+    }
+
+    .lang-hero-title {
+        font-size: 28px;
+    }
+
+    .lang-hero-subtitle {
+        font-size: 13px;
+    }
+
+    .lang-play-all-btn {
+        margin-left: 0;
+        margin-top: 12px;
+        width: 100%;
+        text-align: center;
+        padding: 12px 20px;
+    }
+
+    .lang-mood-chips-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 16px;
+    }
+
+    .lang-mood-chip {
+        justify-content: center;
+        padding: 10px 6px;
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .lang-mood-chip i {
+        font-size: 10px;
+    }
+
+    .lang-search-box-container {
+        margin: 12px 0 16px;
+    }
+
+    .lang-search-wrapper {
+        max-width: none;
+    }
+
+    .lang-page {
+        padding-bottom: 16px;
+    }
 }
 
 /* Mood Loader & Empty */

@@ -94,8 +94,8 @@
                 toggle.className = 'sidebar-toggle control-btn';
                 toggle.setAttribute('aria-label', 'Menu');
                 toggle.innerHTML = '<i class="fas fa-bars"></i>';
-                const navControls = document.querySelector('.nav-controls');
-                if (navControls) navControls.prepend(toggle);
+                const header = document.querySelector('.top-header');
+                if (header) header.prepend(toggle);
             }
             const close = () => {
                 sidebar?.classList.remove('open');
