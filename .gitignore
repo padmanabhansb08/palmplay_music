@@ -3,5 +3,6 @@ node_modules/
 Thumbs.db
 .vscode/
 .env
+pamplay-frontend/catalog-config.js
 *.log
 .vercel

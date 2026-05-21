@@ -1,4 +1,85 @@
 
+// API config (public: env-config.js; catalog URL: gitignored catalog-config.js only)
+const _env = (typeof window !== 'undefined' && window.PALMPLAY_ENV) ? window.PALMPLAY_ENV : {};
+const _catalog = (typeof window !== 'undefined' && window.PALMPLAY_CATALOG) ? window.PALMPLAY_CATALOG : {};
+const AUDIUS_HOST = (_env.AUDIUS_API_HOST || 'https://discoveryprovider.audius.co').replace(/\/$/, '');
+const AUDIUS_DISCOVERY_URL = _env.AUDIUS_DISCOVERY_URL || 'https://api.audius.co';
+const AUDIUS_APP_NAME = _env.AUDIUS_APP_NAME || 'PalmPlay';
+const MUSIC_CATALOG_API_BASE = (_catalog.apiBase || '').replace(/\/$/, '');
+const DEFAULT_ART_URL = _env.DEFAULT_ART_URL || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
+
+const TRAFFIC_LIMITS = {
+    requestsPerMinute: Math.max(5, parseInt(_env.CATALOG_REQUESTS_PER_MINUTE, 10) || 30),
+    maxConcurrent: Math.max(1, parseInt(_env.CATALOG_MAX_CONCURRENT, 10) || 4),
+    fallbackMinutes: Math.max(1, parseInt(_env.CATALOG_FALLBACK_MINUTES, 10) || 15),
+};
+
+/** Switches catalog API → Audius when request rate or concurrency is high (friends-scale protection). */
+const catalogTraffic = {
+    inFlight: 0,
+    _storageKey: 'palmplay_catalog_traffic',
+
+    _load() {
+        try {
+            return JSON.parse(sessionStorage.getItem(this._storageKey) || '{}');
+        } catch {
+            return {};
+        }
+    },
+
+    _save(s) {
+        try {
+            sessionStorage.setItem(this._storageKey, JSON.stringify(s));
+        } catch (_) {}
+    },
+
+    _rollWindow(s, now) {
+        if (!s.windowStart || now - s.windowStart > 60000) {
+            return { count: 0, windowStart: now, fallbackUntil: s.fallbackUntil || 0 };
+        }
+        return s;
+    },
+
+    isAudiusFallbackActive() {
+        const now = Date.now();
+        const s = this._load();
+        if (s.fallbackUntil && now < s.fallbackUntil) return true;
+        if (this.inFlight >= TRAFFIC_LIMITS.maxConcurrent) return true;
+        const rolled = this._rollWindow(s, now);
+        return rolled.count >= TRAFFIC_LIMITS.requestsPerMinute;
+    },
+
+    _enterFallback(now) {
+        const s = this._rollWindow(this._load(), now);
+        s.fallbackUntil = now + TRAFFIC_LIMITS.fallbackMinutes * 60 * 1000;
+        this._save(s);
+        if (!sessionStorage.getItem('palmplay_fallback_toast')) {
+            sessionStorage.setItem('palmplay_fallback_toast', '1');
+            if (typeof showToast === 'function') {
+                showToast('High demand — showing Audius picks for now', 'fa-bolt');
+            }
+        }
+    },
+
+    recordStart() {
+        const now = Date.now();
+        let s = this._rollWindow(this._load(), now);
+        s.count = (s.count || 0) + 1;
+        this.inFlight++;
+        if (s.count >= TRAFFIC_LIMITS.requestsPerMinute || this.inFlight > TRAFFIC_LIMITS.maxConcurrent) {
+            this._enterFallback(now);
+        }
+        this._save(s);
+    },
+
+    recordEnd() {
+        this.inFlight = Math.max(0, this.inFlight - 1);
+    },
+
+    shouldUseAudius() {
+        return this.isAudiusFallbackActive();
+    }
+};
 
 // Local Music Database & State
 let playlists = []; // Array of { name: string, tracks: [] }
@@ -384,7 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         ...t,
                         url,
                         duration,
-                        art: t.artBlob ? URL.createObjectURL(t.artBlob) : 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop'
+                        art: t.artBlob ? URL.createObjectURL(t.artBlob) : DEFAULT_ART_URL
                     });
                 }
 
@@ -400,7 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const savedLiked = await db.likedSongs.where('userId').equals(savedUser.email).toArray();
                 likedSongs = savedLiked.map(ls => ({
                     ...ls,
-                    art: ls.artBlob ? URL.createObjectURL(ls.artBlob) : (ls.artUrl || ls.art || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop')
+                    art: ls.artBlob ? URL.createObjectURL(ls.artBlob) : (ls.artUrl || ls.art || DEFAULT_ART_URL)
                 }));
                 
                 // Inject Audius liked tracks into temporary playlist so they can be played
@@ -831,7 +912,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 id: trackId,
                 ...trackData,
                 url: URL.createObjectURL(file),
-                art: metadata.art || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop'
+                art: metadata.art || DEFAULT_ART_URL
             };
             newTracks.push(track);
         }
@@ -1029,9 +1110,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             let url = '';
             if (category === 'Trending') {
-                url = 'https://discoveryprovider.audius.co/v1/tracks/trending?app_name=PalmPlay&limit=20';
+                url = `${AUDIUS_HOST}/v1/tracks/trending?app_name=${AUDIUS_APP_NAME}&limit=20`;
             } else {
-                url = `https://discoveryprovider.audius.co/v1/tracks/search?query=${encodeURIComponent(category)}&app_name=PalmPlay`;
+                url = `${AUDIUS_HOST}/v1/tracks/search?query=${encodeURIComponent(category)}&app_name=${AUDIUS_APP_NAME}`;
             }
             
             const res = await fetch(url);
@@ -1063,8 +1144,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 artist: t.user?.name || 'Unknown',
                 album: 'Audius',
                 duration: t.duration,
-                url: `https://discoveryprovider.audius.co/v1/tracks/${t.id}/stream?app_name=PalmPlay`,
-                art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop',
+                url: `${AUDIUS_HOST}/v1/tracks/${t.id}/stream?app_name=${AUDIUS_APP_NAME}`,
+                art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || DEFAULT_ART_URL,
                 isAudius: true
             }));
             
@@ -1443,7 +1524,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return txt.value;
     }
 
-    function pickSaavnUrl(arr) {
+    function pickMediaUrl(arr) {
         if (!Array.isArray(arr) || arr.length === 0) return '';
         for (let i = arr.length - 1; i >= 0; i--) {
             const item = arr[i];
@@ -1454,17 +1535,59 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     }
 
-    async function fetchJioSaavnTracks(query, limit = 30) {
+    function mapAudiusTracksToPlaylist(items, limit) {
+        return (items || []).slice(0, limit).map(t => ({
+            id: t.id,
+            name: t.title,
+            artist: t.user?.name || 'Unknown',
+            album: 'Audius',
+            duration: parseInt(t.duration, 10) || 200,
+            language: '',
+            plays: t.play_count || 0,
+            url: `${AUDIUS_HOST}/v1/tracks/${t.id}/stream?app_name=${AUDIUS_APP_NAME}`,
+            art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || DEFAULT_ART_URL,
+            isAudius: true,
+            isCatalogFallback: true
+        }));
+    }
+
+    async function fetchAudiusCatalogFallback(query, limit = 30) {
         try {
-            const url = `https://saavn.sumit.co/api/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`;
+            const q = (query || '').trim();
+            const useTrending = /^latest\s+hits$/i.test(q) || q.length < 2;
+            const url = useTrending
+                ? `${AUDIUS_HOST}/v1/tracks/trending?app_name=${AUDIUS_APP_NAME}&limit=${limit}`
+                : `${AUDIUS_HOST}/v1/tracks/search?query=${encodeURIComponent(q)}&app_name=${AUDIUS_APP_NAME}`;
+            const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+            const data = await res.json();
+            return mapAudiusTracksToPlaylist(data.data, limit);
+        } catch (e) {
+            console.error('Audius fallback failed:', e);
+            return [];
+        }
+    }
+
+    async function fetchCatalogTracks(query, limit = 30) {
+        if (catalogTraffic.shouldUseAudius()) {
+            return fetchAudiusCatalogFallback(query, limit);
+        }
+        if (!MUSIC_CATALOG_API_BASE) {
+            return fetchAudiusCatalogFallback(query, limit);
+        }
+
+        catalogTraffic.recordStart();
+        try {
+            const url = `${MUSIC_CATALOG_API_BASE}/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`;
             const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
             const data = await res.json();
             const results = data?.data?.results;
-            if (!Array.isArray(results) || results.length === 0) return [];
+            if (!Array.isArray(results) || results.length === 0) {
+                return fetchAudiusCatalogFallback(query, limit);
+            }
 
             return results.map(t => {
-                const img = pickSaavnUrl(t.image) || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
-                const streamUrl = pickSaavnUrl(t.downloadUrl);
+                const img = pickMediaUrl(t.image) || DEFAULT_ART_URL;
+                const streamUrl = pickMediaUrl(t.downloadUrl);
 
                 let artist = '';
                 if (Array.isArray(t.artists?.primary) && t.artists.primary.length > 0) {
@@ -1479,19 +1602,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     id: t.id,
                     name: decodeHtmlEntities(t.name) || 'Unknown',
                     artist: decodeHtmlEntities(artist) || 'Various Artists',
-                    album: decodeHtmlEntities(t.album?.name) || 'JioSaavn',
+                    album: decodeHtmlEntities(t.album?.name) || 'Single',
                     duration: parseInt(t.duration) || 200,
                     language: t.language || '',
                     plays: Math.floor(Math.random() * 50000) + 10000,
                     url: streamUrl,
                     art: img,
-                    isSaavn: true
+                    isCatalog: true
                 };
             }).filter(t => t.url);
         } catch (e) {
-            console.error("JioSaavn API Fetch Error:", e);
+            console.error('Catalog fetch failed:', e);
+            catalogTraffic._enterFallback(Date.now());
+            return fetchAudiusCatalogFallback(query, limit);
+        } finally {
+            catalogTraffic.recordEnd();
         }
-        return [];
     }
 
     let audiusSearchTimeout = null;
@@ -1570,7 +1696,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="search-hero-text">
                     <h2>Discover Something New</h2>
-                    <p>Search across millions of high-fidelity songs on the JioSaavn network</p>
+                    <p>Search across millions of songs — browse by language, mood, and genre</p>
                 </div>
             </div>
 
@@ -1707,7 +1833,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const trendGrid = document.getElementById('search-trending-grid');
             if (!trendGrid) return;
             try {
-                const tracks = await fetchJioSaavnTracks("Latest Hits", 12);
+                const tracks = await fetchCatalogTracks("Latest Hits", 12);
 
                 if (tracks.length === 0) {
                     trendGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Could not load trending.</p>';
@@ -1799,7 +1925,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="lang-hero-script">${lang.script}</div>
                     <div class="lang-hero-info">
                         <h1 class="lang-hero-title">${lang.name}</h1>
-                        <p class="lang-hero-subtitle">Explore ${lang.moods.length} moods · Powered by Audius</p>
+                        <p class="lang-hero-subtitle">Explore ${lang.moods.length} moods · PalmPlay</p>
                     </div>
                     <button class="lang-play-all-btn" id="lang-play-all">
                         <i class="fas fa-play"></i> Play All
@@ -1862,9 +1988,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const moodRowsContainer = cardGrid.querySelector('.lang-mood-rows');
 
         // Resolve healthy API host once
-        let apiHost = 'https://discoveryprovider.audius.co';
+        let apiHost = AUDIUS_HOST;
         try {
-            const hostRes = await fetch('https://api.audius.co', { signal: AbortSignal.timeout(3000) });
+            const hostRes = await fetch(AUDIUS_DISCOVERY_URL, { signal: AbortSignal.timeout(3000) });
             const hostData = await hostRes.json();
             if (hostData?.data?.length > 0) apiHost = hostData.data[0];
         } catch(_) {}
@@ -1891,7 +2017,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 langSearchTimeout = setTimeout(async () => {
                     try {
-                        const tracks = await fetchJioSaavnTracks(`${lang.name} ${query}`, 30);
+                        const tracks = await fetchCatalogTracks(`${lang.name} ${query}`, 30);
 
                         if (tracks.length === 0) {
                             resultsGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No matching ' + lang.name + ' tracks found.</p>';
@@ -1940,7 +2066,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 const query = `${lang.name} ${mood}`;
-                const tracks = await fetchJioSaavnTracks(query, 15);
+                const tracks = await fetchCatalogTracks(query, 15);
 
                 if (tracks.length === 0) {
                     grid.innerHTML = '<p class="mood-empty">No tracks found for this mood.</p>';
@@ -2040,11 +2166,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             audiusContainer.style.display = 'block';
-            audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;"><i class="fas fa-spinner fa-spin"></i> Searching JioSaavn...</p>';
+            audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;"><i class="fas fa-spinner fa-spin"></i> Searching...</p>';
 
             audiusSearchTimeout = setTimeout(async () => {
                 try {
-                    const tracks = await fetchJioSaavnTracks(query, 30);
+                    const tracks = await fetchCatalogTracks(query, 30);
                     
                     if (tracks.length === 0) {
                         audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found for "' + query + '". Try different keywords.</p>';
@@ -2084,8 +2210,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     
                 } catch (e) {
-                    console.error("JioSaavn API Error:", e);
-                    audiusGrid.innerHTML = '<p style="color:#ff4444; padding:20px;"><i class="fas fa-exclamation-triangle"></i> Could not search JioSaavn. Check your connection.</p>';
+                    console.error('Catalog search failed:', e);
+                    audiusGrid.innerHTML = '<p style="color:#ff4444; padding:20px;"><i class="fas fa-exclamation-triangle"></i> Could not load results. Check your connection.</p>';
                 }
             }, 800);
         }
@@ -2163,7 +2289,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 likedSongs.push({
                     ...likedData,
                     id: newId,
-                    art: track.art || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop'
+                    art: track.art || DEFAULT_ART_URL
                 });
             } catch (e) {
                 console.error('Failed to save liked song to DB:', e);
@@ -2171,7 +2297,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 likedSongs.push({
                     ...likedData,
                     id: Date.now(),
-                    art: track.art || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop'
+                    art: track.art || DEFAULT_ART_URL
                 });
             }
             state.isLiked = true;
@@ -2280,7 +2406,7 @@ document.addEventListener('DOMContentLoaded', () => {
         likedSongs.forEach((liked, tIndex) => {
             const tr = document.createElement('tr');
             tr.className = 'track-row';
-            const artSrc = liked.art || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
+            const artSrc = liked.art || DEFAULT_ART_URL;
             const albumName = liked.album || 'Liked Songs';
             const dateAdded = liked.dateAdded ? formatDateAdded(liked.dateAdded) : '-';
             const duration = liked.duration ? formatDuration(liked.duration) : '--:--';
