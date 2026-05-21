@@ -83,24 +83,27 @@
         return {};
     }
 
-    async function signIn(email, password) {
+    async function signIn(email, password, captchaToken) {
         if (!client) await init();
         if (!client) throw new Error('Supabase is not configured');
-        const { data, error } = await client.auth.signInWithPassword({ email, password });
+        const options = captchaToken ? { captchaToken } : undefined;
+        const { data, error } = await client.auth.signInWithPassword({ email, password, options });
         if (error) throw error;
         if (data.session) writeStoredUser(profileFromSession(data.session));
         return getUser();
     }
 
-    async function signUp(email, password, displayName) {
+    async function signUp(email, password, displayName, captchaToken) {
         if (!client) await init();
         if (!client) throw new Error('Supabase is not configured');
+        const options = {
+            data: { display_name: displayName || email.split('@')[0] }
+        };
+        if (captchaToken) options.captchaToken = captchaToken;
         const { data, error } = await client.auth.signUp({
             email,
             password,
-            options: {
-                data: { display_name: displayName || email.split('@')[0] }
-            }
+            options
         });
         if (error) throw error;
         if (data.session) writeStoredUser(profileFromSession(data.session));

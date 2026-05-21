@@ -33,6 +33,7 @@ const catalogDefaults = {
 const supabaseDefaults = {
     SUPABASE_URL: '',
     SUPABASE_ANON_KEY: '',
+    TURNSTILE_SITE_KEY: '',
 };
 
 const parsed = { ...publicDefaults, ...catalogDefaults, ...supabaseDefaults };
@@ -73,6 +74,7 @@ if (process.env.MUSIC_CATALOG_API_BASE) parsed.MUSIC_CATALOG_API_BASE = String(p
 if (process.env.JIOSAAVN_API_BASE) parsed.MUSIC_CATALOG_API_BASE = String(process.env.JIOSAAVN_API_BASE).trim();
 if (process.env.SUPABASE_URL) parsed.SUPABASE_URL = String(process.env.SUPABASE_URL).trim();
 if (process.env.SUPABASE_ANON_KEY) parsed.SUPABASE_ANON_KEY = String(process.env.SUPABASE_ANON_KEY).trim();
+if (process.env.TURNSTILE_SITE_KEY) parsed.TURNSTILE_SITE_KEY = String(process.env.TURNSTILE_SITE_KEY).trim();
 
 const catalogBase = (parsed.MUSIC_CATALOG_API_BASE || '').trim().replace(/\/$/, '');
 
@@ -91,6 +93,7 @@ const supabaseJs = `// Auto-generated Supabase config (gitignored)
 window.PALMPLAY_SUPABASE = ${JSON.stringify({
     url: (parsed.SUPABASE_URL || '').trim(),
     anonKey: (parsed.SUPABASE_ANON_KEY || '').trim(),
+    turnstileSiteKey: (parsed.TURNSTILE_SITE_KEY || '').trim(),
 }, null, 4)};
 `;
 

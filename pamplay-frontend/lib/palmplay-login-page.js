@@ -36,12 +36,31 @@
         setTimeout(redirectHome, 1200);
     }
 
+    function friendlyAuthError(err) {
+        const msg = (err?.message || '').toLowerCase();
+        if (msg.includes('sitekey-secret-mismatch')) {
+            return 'Captcha keys are misconfigured. In Supabase use the Turnstile Secret Key (not the Site Key). See docs/SUPABASE_SETUP.md.';
+        }
+        if (msg.includes('captcha')) {
+            return 'Security check failed. Complete the captcha below or disable captcha in Supabase Auth settings.';
+        }
+        return err?.message || 'Request failed';
+    }
+
     async function initAuthForms(mode) {
         await window.PalmPlayAuth?.init?.();
         const useCloud = window.PalmPlayAuth?.isConfigured?.();
         const subtitle = document.querySelector('.login-subtitle');
         if (subtitle && useCloud) {
             subtitle.textContent = 'Sign in — playlists and likes sync across your devices.';
+        }
+
+        if (useCloud && window.PalmPlayCaptcha?.isRequired?.()) {
+            try {
+                await window.PalmPlayCaptcha.mount('turnstile-widget');
+            } catch (e) {
+                console.warn('Turnstile mount failed', e);
+            }
         }
 
         if (mode === 'login') {
@@ -52,11 +71,14 @@
                 if (!email || !password) return;
 
                 if (useCloud) {
+                    if (!window.PalmPlayCaptcha?.requireTokenOrToast?.(showToast)) return;
+                    const captchaToken = window.PalmPlayCaptcha?.getToken?.();
                     try {
-                        const user = await window.PalmPlayAuth.signIn(email, password);
+                        const user = await window.PalmPlayAuth.signIn(email, password, captchaToken);
                         await afterAuth(user.name || email);
                     } catch (err) {
-                        showToast(err.message || 'Login failed');
+                        showToast(friendlyAuthError(err));
+                        window.PalmPlayCaptcha?.reset?.();
                     }
                     return;
                 }
@@ -81,8 +103,12 @@
                 if (!email || !password || !profileName) return;
 
                 if (useCloud) {
+                    if (!window.PalmPlayCaptcha?.requireTokenOrToast?.(showToast)) return;
+                    const captchaToken = window.PalmPlayCaptcha?.getToken?.();
                     try {
-                        const { user, needsEmailConfirm } = await window.PalmPlayAuth.signUp(email, password, profileName);
+                        const { user, needsEmailConfirm } = await window.PalmPlayAuth.signUp(
+                            email, password, profileName, captchaToken
+                        );
                         if (needsEmailConfirm) {
                             showToast('Check your email to confirm your account, then log in.');
                             setTimeout(() => {
@@ -92,7 +118,8 @@
                         }
                         await afterAuth(user.name || profileName);
                     } catch (err) {
-                        showToast(err.message || 'Sign up failed');
+                        showToast(friendlyAuthError(err));
+                        window.PalmPlayCaptcha?.reset?.();
                     }
                     return;
                 }
