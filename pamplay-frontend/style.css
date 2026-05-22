@@ -1261,6 +1261,127 @@ body.player-bar-hidden .player-bar {
     background: rgba(255, 0, 0, 0.2);
 }
 
+.import-spotify-btn {
+    border: 1px solid rgba(29, 185, 84, 0.35);
+    background: rgba(29, 185, 84, 0.18);
+    color: #fff;
+    border-radius: 10px;
+    padding: 10px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 700;
+}
+
+.import-spotify-btn:hover {
+    background: rgba(29, 185, 84, 0.3);
+}
+
+.import-manual-toggle {
+    border: 0;
+    background: transparent;
+    color: var(--text-subdued);
+    font-size: 12px;
+    cursor: pointer;
+    text-align: left;
+    padding: 0;
+}
+
+.import-manual-toggle:hover {
+    color: #fff;
+}
+
+.import-manual-wrap[hidden] {
+    display: none;
+}
+
+.transfer-flow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 10px;
+}
+
+.transfer-flow-icon {
+    font-size: 30px;
+    color: #1db954;
+}
+
+.transfer-flow-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.transfer-flow-sub {
+    font-size: 13px;
+    color: var(--text-subdued);
+}
+
+.transfer-flow-progress {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+    margin-top: 4px;
+}
+
+.transfer-flow-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #1db954, #35d078);
+    transition: width 0.25s ease;
+}
+
+.transfer-flow-result {
+    margin-top: 14px;
+    display: grid;
+    gap: 6px;
+    color: var(--text-subdued);
+    font-size: 13px;
+}
+
+.transfer-open-btn {
+    margin-top: 8px;
+    border: 1px solid rgba(29, 185, 84, 0.35);
+    background: rgba(29, 185, 84, 0.2);
+    color: #fff;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.transfer-open-btn:hover {
+    background: rgba(29, 185, 84, 0.3);
+}
+
+.import-divider {
+    margin: 2px 0;
+    text-align: center;
+    position: relative;
+    color: var(--text-subdued);
+    font-size: 12px;
+}
+
+.import-divider::before,
+.import-divider::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 42%;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.import-divider::before { left: 0; }
+.import-divider::after { right: 0; }
+
 .import-tracks-text {
     width: 100%;
     min-height: 140px;

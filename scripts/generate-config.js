@@ -24,6 +24,7 @@ const publicDefaults = {
     CATALOG_REQUESTS_PER_MINUTE: '30',
     CATALOG_MAX_CONCURRENT: '4',
     CATALOG_FALLBACK_MINUTES: '15',
+    SPOTIFY_CLIENT_ID: '',
 };
 
 const catalogDefaults = {

@@ -7,6 +7,7 @@ const AUDIUS_DISCOVERY_URL = _env.AUDIUS_DISCOVERY_URL || 'https://api.audius.co
 const AUDIUS_APP_NAME = _env.AUDIUS_APP_NAME || 'PalmPlay';
 const MUSIC_CATALOG_API_BASE = (_catalog.apiBase || '').trim().replace(/\/$/, '');
 const DEFAULT_ART_URL = _env.DEFAULT_ART_URL || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
+const SPOTIFY_CLIENT_ID = (_env.SPOTIFY_CLIENT_ID || '').trim();
 
 const TRAFFIC_LIMITS = {
     requestsPerMinute: Math.max(5, parseInt(_env.CATALOG_REQUESTS_PER_MINUTE, 10) || 30),
@@ -330,6 +331,29 @@ function parseImportedTrackEntries(rawText) {
     });
 
     return entries;
+}
+
+function randomToken(size = 64) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    const bytes = new Uint8Array(size);
+    crypto.getRandomValues(bytes);
+    let out = '';
+    for (let i = 0; i < bytes.length; i++) {
+        out += chars[bytes[i] % chars.length];
+    }
+    return out;
+}
+
+function base64UrlFromBytes(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function pkceChallenge(verifier) {
+    const data = new TextEncoder().encode(verifier);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return base64UrlFromBytes(new Uint8Array(digest));
 }
 
 // Adaptive Ambient Light logic
@@ -772,6 +796,16 @@ document.addEventListener('DOMContentLoaded', () => {
         await loadFromDatabase();
         updatePlayerUI();
         routeInitialView();
+        let spotifyHandled = false;
+        try {
+            spotifyHandled = await handleSpotifyOAuthCallback();
+            if (spotifyHandled && sessionStorage.getItem(SPOTIFY_AUTO_IMPORT_KEY) === '1') {
+                sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
+                await importSpotifyLibraryToPalmPlay();
+            }
+        } catch (e) {
+            console.warn('Spotify callback handling failed', e);
+        }
         const params = new URLSearchParams(window.location.search);
         if (params.get('q') && ppRoutes().isExplorePage()) {
             const q = decodeURIComponent(params.get('q'));
@@ -1527,6 +1561,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const RECENT_SEARCHES_MAX = 15;
     const PERSONAL_FEEDBACK_KEY = 'palmplay_personal_feedback_v1';
     const QUEUE_STATE_KEY = 'palmplay_queue_state_v1';
+    const SPOTIFY_TOKEN_KEY = 'palmplay_spotify_tokens_v1';
+    const SPOTIFY_PKCE_STATE_KEY = 'palmplay_spotify_pkce_state';
+    const SPOTIFY_PKCE_VERIFIER_KEY = 'palmplay_spotify_pkce_verifier';
+    const SPOTIFY_AUTO_IMPORT_KEY = 'palmplay_spotify_auto_import';
+    const SPOTIFY_SCOPES = [
+        'user-library-read',
+        'playlist-read-private',
+        'playlist-read-collaborative'
+    ].join(' ');
     let playbackRecoveryLock = false;
     let playRequestToken = 0;
     let autoSkipAttempts = 0;
@@ -2713,6 +2756,344 @@ document.addEventListener('DOMContentLoaded', () => {
         return added;
     }
 
+    function isSpotifyConfigured() {
+        return !!SPOTIFY_CLIENT_ID;
+    }
+
+    function getSpotifyRedirectUri() {
+        return `${location.origin}${location.pathname}`;
+    }
+
+    function loadSpotifyTokens() {
+        try {
+            const raw = localStorage.getItem(SPOTIFY_TOKEN_KEY);
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (!parsed?.accessToken) return null;
+            return parsed;
+        } catch {
+            return null;
+        }
+    }
+
+    function saveSpotifyTokens(payload) {
+        if (!payload?.access_token) return;
+        const current = loadSpotifyTokens() || {};
+        const expiresIn = Math.max(300, Number(payload.expires_in || 3600));
+        const next = {
+            accessToken: payload.access_token,
+            refreshToken: payload.refresh_token || current.refreshToken || '',
+            expiresAt: Date.now() + ((expiresIn - 60) * 1000)
+        };
+        localStorage.setItem(SPOTIFY_TOKEN_KEY, JSON.stringify(next));
+    }
+
+    async function getValidSpotifyAccessToken() {
+        const stored = loadSpotifyTokens();
+        if (!stored) return null;
+        if (stored.accessToken && Date.now() < (stored.expiresAt || 0)) return stored.accessToken;
+        if (!stored.refreshToken) return null;
+
+        const params = new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: stored.refreshToken,
+            client_id: SPOTIFY_CLIENT_ID
+        });
+        const res = await fetch('https://accounts.spotify.com/api/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString()
+        });
+        if (!res.ok) throw new Error('Spotify token refresh failed');
+        const data = await res.json();
+        saveSpotifyTokens(data);
+        return data.access_token;
+    }
+
+    async function startSpotifyConnect(autoImport = true) {
+        if (!isSpotifyConfigured()) {
+            showToast('Spotify connect is not configured yet', 'fa-exclamation-triangle');
+            return;
+        }
+        const verifier = randomToken(96);
+        const stateToken = randomToken(24);
+        const challenge = await pkceChallenge(verifier);
+        sessionStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, verifier);
+        sessionStorage.setItem(SPOTIFY_PKCE_STATE_KEY, stateToken);
+        sessionStorage.setItem(SPOTIFY_AUTO_IMPORT_KEY, autoImport ? '1' : '0');
+        const params = new URLSearchParams({
+            client_id: SPOTIFY_CLIENT_ID,
+            response_type: 'code',
+            redirect_uri: getSpotifyRedirectUri(),
+            code_challenge_method: 'S256',
+            code_challenge: challenge,
+            scope: SPOTIFY_SCOPES,
+            state: stateToken,
+            show_dialog: 'false'
+        });
+        window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+    }
+
+    async function handleSpotifyOAuthCallback() {
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        const returnedState = params.get('state');
+        const error = params.get('error');
+        if (!code && !error) return false;
+
+        if (error) {
+            showToast(`Spotify auth failed: ${error}`, 'fa-exclamation-triangle');
+            history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+            return true;
+        }
+
+        const expectedState = sessionStorage.getItem(SPOTIFY_PKCE_STATE_KEY);
+        const verifier = sessionStorage.getItem(SPOTIFY_PKCE_VERIFIER_KEY);
+        if (!expectedState || !verifier || returnedState !== expectedState) {
+            showToast('Spotify login session expired. Try again.', 'fa-exclamation-triangle');
+            history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+            return true;
+        }
+
+        const tokenParams = new URLSearchParams({
+            client_id: SPOTIFY_CLIENT_ID,
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: getSpotifyRedirectUri(),
+            code_verifier: verifier
+        });
+        const res = await fetch('https://accounts.spotify.com/api/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: tokenParams.toString()
+        });
+        if (!res.ok) {
+            showToast('Spotify connection failed', 'fa-exclamation-triangle');
+            history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+            return true;
+        }
+        const payload = await res.json();
+        saveSpotifyTokens(payload);
+        sessionStorage.removeItem(SPOTIFY_PKCE_STATE_KEY);
+        sessionStorage.removeItem(SPOTIFY_PKCE_VERIFIER_KEY);
+        showToast('Spotify connected', 'fa-check-circle');
+        history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+        return true;
+    }
+
+    async function spotifyApiGet(path) {
+        const token = await getValidSpotifyAccessToken();
+        if (!token) throw new Error('Spotify not connected');
+        const url = path.startsWith('http')
+            ? path
+            : `https://api.spotify.com${path.startsWith('/') ? path : `/${path}`}`;
+        const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) {
+            if (res.status === 401) localStorage.removeItem(SPOTIFY_TOKEN_KEY);
+            throw new Error(`Spotify API failed ${res.status}`);
+        }
+        return res.json();
+    }
+
+    async function spotifyPaginate(path, itemsKey = 'items', pageLimit = 200) {
+        let next = path;
+        const all = [];
+        let guard = 0;
+        while (next && guard < pageLimit) {
+            guard += 1;
+            const data = await spotifyApiGet(next);
+            const items = Array.isArray(data?.[itemsKey]) ? data[itemsKey] : [];
+            all.push(...items);
+            next = data?.next || null;
+        }
+        return all;
+    }
+
+    function spotifyTrackToEntry(track) {
+        if (!track?.name) return null;
+        const artists = Array.isArray(track.artists) ? track.artists.map(a => a?.name).filter(Boolean).join(', ') : '';
+        return {
+            name: track.name,
+            artist: artists
+        };
+    }
+
+    function dedupeImportEntries(entries) {
+        const seen = new Set();
+        return entries.filter((entry) => {
+            const key = `${normalizeTitleKey(entry?.name)}::${primaryArtistKey(entry?.artist)}`;
+            if (!entry?.name || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
+    async function resolveEntriesToTracks(entries, maxEntries = 350) {
+        const capped = dedupeImportEntries(entries).slice(0, maxEntries);
+        const out = [];
+        let misses = 0;
+        const batch = 5;
+        for (let i = 0; i < capped.length; i += batch) {
+            const chunk = capped.slice(i, i + batch);
+            const resolved = await Promise.all(chunk.map((entry) => resolveImportedTrack(entry).catch(() => null)));
+            resolved.forEach((track) => {
+                if (track) out.push(track);
+                else misses += 1;
+            });
+        }
+        return { tracks: out, misses };
+    }
+
+    async function importEntriesAsPlaylist(entries, playlistName) {
+        const plIndex = await createUserPlaylist(playlistName);
+        if (plIndex < 0) return { added: 0, misses: entries.length };
+        const { tracks, misses } = await resolveEntriesToTracks(entries);
+        const added = await addTracksToUserPlaylistBatch(plIndex, tracks);
+        return { plIndex, added, misses };
+    }
+
+    function showTransferProgressModal() {
+        const container = document.getElementById('modal-container');
+        const titleEl = document.getElementById('modal-title');
+        const messageEl = document.getElementById('modal-message');
+        const inputEl = document.getElementById('modal-input');
+        const confirmBtn = document.getElementById('modal-confirm');
+        const cancelBtn = document.getElementById('modal-cancel');
+        if (!container || !titleEl || !messageEl || !inputEl || !confirmBtn || !cancelBtn) return;
+
+        titleEl.textContent = 'Transfer My Music';
+        messageEl.innerHTML = `
+            <div class="transfer-flow">
+                <div class="transfer-flow-icon"><i class="fas fa-compact-disc"></i></div>
+                <div class="transfer-flow-title" id="transfer-flow-title">Preparing transfer...</div>
+                <div class="transfer-flow-sub" id="transfer-flow-sub">Please keep this screen open.</div>
+                <div class="transfer-flow-progress">
+                    <div class="transfer-flow-progress-fill" id="transfer-flow-progress-fill"></div>
+                </div>
+            </div>
+        `;
+        inputEl.style.display = 'none';
+        confirmBtn.style.display = 'none';
+        cancelBtn.style.display = 'inline-flex';
+        cancelBtn.textContent = 'Close';
+        cancelBtn.onclick = () => {
+            container.style.display = 'none';
+        };
+        container.style.display = 'flex';
+    }
+
+    function updateTransferProgress(title, subtitle, percent = null) {
+        const t = document.getElementById('transfer-flow-title');
+        const s = document.getElementById('transfer-flow-sub');
+        const fill = document.getElementById('transfer-flow-progress-fill');
+        if (t) t.textContent = title || 'Working...';
+        if (s) s.textContent = subtitle || '';
+        if (fill && percent != null && Number.isFinite(percent)) {
+            fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+        }
+    }
+
+    function finishTransferProgress({ added = 0, misses = 0, playlists = 0, plIndex = -1 }) {
+        const iconWrap = document.querySelector('.transfer-flow-icon');
+        const messageEl = document.getElementById('modal-message');
+        if (iconWrap) iconWrap.innerHTML = '<i class="fas fa-check-circle"></i>';
+        updateTransferProgress(
+            `Imported ${added} songs`,
+            misses ? `${misses} songs were not available in our catalog.` : 'Everything found was imported.',
+            100
+        );
+
+        if (messageEl) {
+            const footer = document.createElement('div');
+            footer.className = 'transfer-flow-result';
+            footer.innerHTML = `
+                <div><strong>${playlists}</strong> playlists created</div>
+                <div><strong>${added}</strong> tracks added</div>
+                <div><strong>${misses}</strong> unavailable</div>
+                <button type="button" class="transfer-open-btn" id="transfer-open-btn">Open Imported Library</button>
+            `;
+            messageEl.appendChild(footer);
+            document.getElementById('transfer-open-btn')?.addEventListener('click', () => {
+                if (plIndex >= 0) showPlaylist(plIndex);
+                const container = document.getElementById('modal-container');
+                if (container) container.style.display = 'none';
+            });
+        }
+    }
+
+    async function importSpotifyLibraryToPalmPlay() {
+        if (!isUserLoggedIn()) {
+            showToast('Log in to import Spotify library', 'fa-user-lock');
+            ppRoutes().go('login');
+            return;
+        }
+        if (!isSpotifyConfigured()) {
+            showToast('Set SPOTIFY_CLIENT_ID first', 'fa-exclamation-triangle');
+            return;
+        }
+        showTransferProgressModal();
+        updateTransferProgress('Connecting Spotify...', 'Authorizing and preparing your library import.', 6);
+
+        updateTransferProgress('Importing liked songs...', 'Fetching your Spotify liked songs.', 15);
+        const savedItems = await spotifyPaginate('/v1/me/tracks?limit=50');
+        const likedEntries = savedItems
+            .map(item => spotifyTrackToEntry(item?.track))
+            .filter(Boolean);
+
+        updateTransferProgress('Importing playlists...', 'Reading your Spotify playlists.', 28);
+        const playlistsMeta = await spotifyPaginate('/v1/me/playlists?limit=50');
+        let totalAdded = 0;
+        let totalMisses = 0;
+        let lastPlaylistIndex = -1;
+        let importedPlaylistCount = 0;
+
+        if (likedEntries.length) {
+            updateTransferProgress('Matching tracks...', 'Matching liked songs in PalmPlay catalog.', 36);
+            const likedResult = await importEntriesAsPlaylist(likedEntries, `Spotify Liked Songs ${new Date().toLocaleDateString()}`);
+            totalAdded += likedResult.added || 0;
+            totalMisses += likedResult.misses || 0;
+            lastPlaylistIndex = likedResult.plIndex ?? lastPlaylistIndex;
+            if ((likedResult.added || 0) > 0) importedPlaylistCount += 1;
+        }
+
+        const totalPlaylists = Math.max(1, playlistsMeta.length);
+        for (const pl of playlistsMeta) {
+            if (!pl?.id || !pl?.name) continue;
+            const idx = playlistsMeta.indexOf(pl);
+            const pct = 40 + Math.round((idx / totalPlaylists) * 50);
+            updateTransferProgress(`Importing "${pl.name}"`, 'Matching tracks and creating playlist.', pct);
+            const items = await spotifyPaginate(`/v1/playlists/${encodeURIComponent(pl.id)}/tracks?limit=100`);
+            const entries = items
+                .map(item => spotifyTrackToEntry(item?.track))
+                .filter(Boolean);
+            if (!entries.length) continue;
+            const result = await importEntriesAsPlaylist(entries, `${pl.name} (Spotify)`);
+            totalAdded += result.added || 0;
+            totalMisses += result.misses || 0;
+            if (typeof result.plIndex === 'number') lastPlaylistIndex = result.plIndex;
+            if ((result.added || 0) > 0) importedPlaylistCount += 1;
+        }
+
+        if (totalAdded > 0) {
+            showToast(`Spotify imported: ${totalAdded} tracks${totalMisses ? ` (${totalMisses} unavailable)` : ''}`, 'fa-check-circle');
+            finishTransferProgress({
+                added: totalAdded,
+                misses: totalMisses,
+                playlists: importedPlaylistCount,
+                plIndex: lastPlaylistIndex
+            });
+        } else {
+            showToast('No Spotify tracks matched our catalog', 'fa-exclamation-triangle');
+            finishTransferProgress({
+                added: 0,
+                misses: totalMisses,
+                playlists: 0,
+                plIndex: -1
+            });
+        }
+    }
+
     let modalConfirmPrevDisplay = '';
 
     function closePlaylistPickerModal() {
@@ -2785,13 +3166,19 @@ document.addEventListener('DOMContentLoaded', () => {
         titleEl.textContent = 'Import from Spotify & Apps';
         messageEl.innerHTML = `
             <div class="import-apps-panel">
-                <p>Use TuneMyMusic to export tracks from Spotify, Apple Music, YouTube Music, and more.</p>
-                <button type="button" class="import-tmm-btn" id="open-tmm-btn"><i class="fas fa-external-link-alt"></i> Open TuneMyMusic</button>
-                <textarea id="import-tracks-text" class="import-tracks-text" placeholder="Paste exported track list here (CSV or lines like: Song, Artist)."></textarea>
-                <label class="import-file-label">
-                    <input type="file" id="import-tracks-file" accept=".txt,.csv,text/plain,text/csv">
-                    <i class="fas fa-file-upload"></i> Load TXT/CSV file
-                </label>
+                <p>One tap transfer from Spotify with automatic playlist import.</p>
+                <button type="button" class="import-spotify-btn" id="import-spotify-btn"><i class="fab fa-spotify"></i> Transfer My Music</button>
+                <button type="button" class="import-manual-toggle" id="import-manual-toggle">Having trouble? Use manual import</button>
+                <div class="import-manual-wrap" id="import-manual-wrap" hidden>
+                    <p class="import-divider"><span>manual fallback</span></p>
+                    <p>Use TuneMyMusic to export tracks from Spotify, Apple Music, YouTube Music, and more.</p>
+                    <button type="button" class="import-tmm-btn" id="open-tmm-btn"><i class="fas fa-external-link-alt"></i> Open TuneMyMusic</button>
+                    <textarea id="import-tracks-text" class="import-tracks-text" placeholder="Paste exported track list here (CSV or lines like: Song, Artist)."></textarea>
+                    <label class="import-file-label">
+                        <input type="file" id="import-tracks-file" accept=".txt,.csv,text/plain,text/csv">
+                        <i class="fas fa-file-upload"></i> Load TXT/CSV file
+                    </label>
+                </div>
             </div>
         `;
         inputEl.style.display = 'block';
@@ -2806,6 +3193,40 @@ document.addEventListener('DOMContentLoaded', () => {
         openTmm?.addEventListener('click', (e) => {
             e.preventDefault();
             window.open('https://www.tunemymusic.com/', '_blank', 'noopener,noreferrer');
+        });
+        const spotifyBtn = document.getElementById('import-spotify-btn');
+        spotifyBtn?.addEventListener('click', async (e) => {
+            e.preventDefault();
+            if (!isSpotifyConfigured()) {
+                showToast('Spotify transfer unavailable: missing SPOTIFY_CLIENT_ID', 'fa-exclamation-triangle');
+                return;
+            }
+            container.style.display = 'none';
+            try {
+                const token = await getValidSpotifyAccessToken();
+                if (token) {
+                    await importSpotifyLibraryToPalmPlay();
+                } else {
+                    await startSpotifyConnect(true);
+                }
+            } catch (err) {
+                console.warn('Spotify import start failed', err);
+                showToast('Could not start Spotify import', 'fa-exclamation-triangle');
+            }
+        });
+        const manualToggle = document.getElementById('import-manual-toggle');
+        const manualWrap = document.getElementById('import-manual-wrap');
+        manualToggle?.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (!manualWrap) return;
+            const hidden = manualWrap.hasAttribute('hidden');
+            if (hidden) {
+                manualWrap.removeAttribute('hidden');
+                manualToggle.textContent = 'Hide manual import';
+            } else {
+                manualWrap.setAttribute('hidden', '');
+                manualToggle.textContent = 'Having trouble? Use manual import';
+            }
         });
 
         const tracksTextEl = document.getElementById('import-tracks-text');
