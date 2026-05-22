@@ -264,6 +264,74 @@ function showModal(title, message, onConfirm, showInput = false, defaultValue = 
     };
 }
 
+function parseDelimitedLine(line) {
+    const parts = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+            inQuotes = !inQuotes;
+            continue;
+        }
+        if ((ch === ',' || ch === ';') && !inQuotes) {
+            parts.push(cur.trim());
+            cur = '';
+            continue;
+        }
+        cur += ch;
+    }
+    parts.push(cur.trim());
+    return parts.filter(Boolean);
+}
+
+function parseImportedTrackEntries(rawText) {
+    const lines = String(rawText || '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+    const entries = [];
+    const seen = new Set();
+
+    const pushEntry = (name, artist = '') => {
+        const cleanName = String(name || '').replace(/^\d+[\)\.\-\s]+/, '').trim();
+        const cleanArtist = String(artist || '').trim();
+        if (!cleanName || /^https?:\/\//i.test(cleanName)) return;
+        const key = `${cleanName.toLowerCase()}::${cleanArtist.toLowerCase()}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        entries.push({
+            name: cleanName,
+            artist: cleanArtist,
+            query: `${cleanName} ${cleanArtist}`.trim()
+        });
+    };
+
+    lines.forEach((line) => {
+        const cols = parseDelimitedLine(line);
+        if (cols.length >= 2) {
+            const joined = cols.join(' ').toLowerCase();
+            if (/(track|title|song).*(artist)|(artist).*(track|title|song)/.test(joined) && cols.length <= 4) return;
+            if (/^#?$/.test(cols[0]) || /^\d+$/.test(cols[0])) cols.shift();
+            if (cols.length >= 2) {
+                pushEntry(cols[0], cols[1]);
+                return;
+            }
+        }
+
+        if (line.includes(' - ')) {
+            const parts = line.split(' - ').map(s => s.trim()).filter(Boolean);
+            if (parts.length >= 2) {
+                pushEntry(parts[0], parts[1]);
+                return;
+            }
+        }
+        pushEntry(line, '');
+    });
+
+    return entries;
+}
+
 // Adaptive Ambient Light logic
 function initAtmosphere() {
     const orbs = [
@@ -959,6 +1027,7 @@ document.addEventListener('DOMContentLoaded', () => {
         addFolderBtn.onclick = () => folderInput.click();
 
         const newPlaylistBtn = document.querySelector('#new-playlist-btn');
+        const importAppsBtn = document.querySelector('#import-apps-btn');
         if (newPlaylistBtn) {
             newPlaylistBtn.onclick = (e) => {
                 e.stopPropagation();
@@ -966,6 +1035,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 showModal('New playlist', 'Name your playlist:', async (name) => {
                     await createUserPlaylist(name);
                 }, true, '');
+            };
+        }
+        if (importAppsBtn) {
+            importAppsBtn.onclick = (e) => {
+                e.stopPropagation();
+                addOptions.style.display = 'none';
+                showImportFromAppsModal();
             };
         }
 
@@ -1449,6 +1525,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const PLAY_HISTORY_MAX = 50;
     const RECENT_SEARCHES_KEY = 'palmplay_recent_searches';
     const RECENT_SEARCHES_MAX = 15;
+    const PERSONAL_FEEDBACK_KEY = 'palmplay_personal_feedback_v1';
     const QUEUE_STATE_KEY = 'palmplay_queue_state_v1';
     let playbackRecoveryLock = false;
     let playRequestToken = 0;
@@ -2186,6 +2263,151 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem(PLAY_HISTORY_KEY, JSON.stringify(hist));
     }
 
+    function getTrackIdentity(track) {
+        return `${normalizeTitleKey(track?.name)}::${primaryArtistKey(track?.artist)}`;
+    }
+
+    function loadPersonalFeedback() {
+        try {
+            const raw = localStorage.getItem(PERSONAL_FEEDBACK_KEY);
+            const parsed = raw ? JSON.parse(raw) : {};
+            return {
+                dislikeTracks: Array.isArray(parsed.dislikeTracks) ? parsed.dislikeTracks.slice(0, 200) : [],
+                boostTracks: Array.isArray(parsed.boostTracks) ? parsed.boostTracks.slice(0, 200) : [],
+                boostArtists: Array.isArray(parsed.boostArtists) ? parsed.boostArtists.slice(0, 120) : []
+            };
+        } catch {
+            return { dislikeTracks: [], boostTracks: [], boostArtists: [] };
+        }
+    }
+
+    function savePersonalFeedback(data) {
+        try {
+            localStorage.setItem(PERSONAL_FEEDBACK_KEY, JSON.stringify(data));
+        } catch (e) {
+            console.warn('Personal feedback save failed', e);
+        }
+    }
+
+    function buildTasteProfile(historyList, likedList, feedback) {
+        const artistScores = new Map();
+        const trackScores = new Map();
+        const languageScores = new Map();
+        const now = Date.now();
+
+        const boost = (map, key, value) => {
+            if (!key) return;
+            map.set(key, (map.get(key) || 0) + value);
+        };
+
+        (historyList || []).slice(0, 40).forEach((track, idx) => {
+            const ageHours = Math.max(1, (now - (track.playedAt || now)) / (1000 * 60 * 60));
+            const recencyWeight = Math.max(0.35, 1.8 / Math.log2(ageHours + 2));
+            const rankWeight = Math.max(0.2, 1.4 - (idx * 0.03));
+            const score = recencyWeight * rankWeight;
+            boost(artistScores, primaryArtistKey(track.artist), score * 1.6);
+            boost(trackScores, getTrackIdentity(track), score * 1.2);
+            const lang = normalizeSearchText(track.language || '');
+            if (lang) boost(languageScores, lang, score);
+        });
+
+        (likedList || []).slice(0, 120).forEach((liked, idx) => {
+            const score = Math.max(0.6, 2.2 - (idx * 0.01));
+            boost(artistScores, primaryArtistKey(liked.artist), score * 1.8);
+            boost(trackScores, getTrackIdentity({ name: liked.trackName || liked.name, artist: liked.artist }), score * 2.4);
+            const lang = normalizeSearchText(liked.language || '');
+            if (lang) boost(languageScores, lang, score * 1.2);
+        });
+
+        (feedback?.boostArtists || []).forEach((artistKey) => boost(artistScores, artistKey, 5));
+        (feedback?.boostTracks || []).forEach((trackKey) => boost(trackScores, trackKey, 7));
+
+        return { artistScores, trackScores, languageScores };
+    }
+
+    function scoreForYouTrack(track, profile, feedback) {
+        const tKey = getTrackIdentity(track);
+        if (feedback.dislikeTracks.includes(tKey)) return -99999;
+        const aKey = primaryArtistKey(track.artist);
+        const langKey = normalizeSearchText(track.language || '');
+        let score = 0;
+        score += (profile.trackScores.get(tKey) || 0) * 3.2;
+        score += (profile.artistScores.get(aKey) || 0) * 2.1;
+        score += (profile.languageScores.get(langKey) || 0) * 1.2;
+        score += Math.min(20, Math.log10((track.plays || 0) + 10) * 3.5);
+        if (feedback.boostTracks.includes(tKey)) score += 32;
+        if (feedback.boostArtists.includes(aKey)) score += 20;
+        return score;
+    }
+
+    async function fetchForYouTracks(feed, history) {
+        const feedback = loadPersonalFeedback();
+        const profile = buildTasteProfile(history, likedSongs, feedback);
+
+        const candidateLists = [];
+        candidateLists.push(feed?.picks || []);
+        candidateLists.push(feed?.trending || []);
+        candidateLists.push((history || []).slice(0, 12));
+        candidateLists.push((await getSpotifyAllTimePool()).slice(0, 45));
+
+        const topArtists = Array.from(profile.artistScores.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([artist]) => artist)
+            .filter(Boolean);
+        if (topArtists.length) {
+            const artistResults = await Promise.all(topArtists.map((a) => fetchCatalogTracks(a, 8).catch(() => [])));
+            candidateLists.push(...artistResults);
+        }
+
+        const all = candidateLists.flat().filter(t => t && t.url && t.name);
+        const deduped = [];
+        const seen = new Set();
+        all.forEach((t) => {
+            const key = getTrackIdentity(t);
+            if (seen.has(key)) return;
+            seen.add(key);
+            deduped.push(t);
+        });
+
+        const ranked = deduped
+            .map((t) => ({ track: t, score: scoreForYouTrack(t, profile, feedback) }))
+            .filter((x) => x.score > -1000)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 30)
+            .map((x) => ({ ...x.track, _forYou: true }));
+
+        return organizeTracksForSelection(ranked, 14);
+    }
+
+    function applyTrackFeedback(track, mode) {
+        const data = loadPersonalFeedback();
+        const tKey = getTrackIdentity(track);
+        const aKey = primaryArtistKey(track.artist);
+        const dislike = new Set(data.dislikeTracks);
+        const boostTracks = new Set(data.boostTracks);
+        const boostArtists = new Set(data.boostArtists);
+
+        if (mode === 'hide') {
+            dislike.add(tKey);
+            boostTracks.delete(tKey);
+            showToast('Less like this from now on', 'fa-ban');
+        } else {
+            boostTracks.add(tKey);
+            boostArtists.add(aKey);
+            dislike.delete(tKey);
+            showToast('We will recommend more like this', 'fa-thumbs-up');
+        }
+
+        savePersonalFeedback({
+            dislikeTracks: Array.from(dislike).slice(-200),
+            boostTracks: Array.from(boostTracks).slice(-200),
+            boostArtists: Array.from(boostArtists).slice(-120)
+        });
+
+        if (state.currentView === 'home') renderHome();
+    }
+
     function upsertTempPlaylist(id, name, tracks) {
         let idx = playlists.findIndex(pl => pl.id === id);
         if (idx === -1) {
@@ -2448,6 +2670,49 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
+    async function addTracksToUserPlaylistBatch(plIndex, rawTracks) {
+        const user = getSavedUser();
+        const uid = getUserId(user);
+        const pl = playlists[plIndex];
+        if (!uid || !isUserPlaylist(pl) || !Array.isArray(rawTracks) || !rawTracks.length) return 0;
+
+        let added = 0;
+        for (const rawTrack of rawTracks) {
+            const track = normalizeStreamTrack(rawTrack);
+            if (!track.url || trackExistsInPlaylist(pl, track)) continue;
+
+            const source = getTrackSource(track);
+            const dbId = await db.tracks.add({
+                userId: uid,
+                playlistId: pl.id,
+                source,
+                externalId: track.id ? String(track.id) : null,
+                name: track.name,
+                artist: track.artist,
+                album: track.album,
+                duration: track.duration,
+                streamUrl: track.url,
+                artUrl: track.art,
+                dateAdded: new Date().toISOString()
+            });
+
+            pl.tracks.push({
+                ...track,
+                dbId,
+                source
+            });
+            added += 1;
+        }
+
+        if (!added) return 0;
+        await db.playlists.update(pl.id, { updatedAt: new Date().toISOString() });
+        renderSidebar();
+        if (state.currentView === 'home') renderHome();
+        window.PalmPlaySync?.pushPlaylist?.(pl).then(() => window.PalmPlaySync?.pushPlaylistTracks?.(pl))
+            .catch((e) => console.warn('Cloud batch track push', e));
+        return added;
+    }
+
     let modalConfirmPrevDisplay = '';
 
     function closePlaylistPickerModal() {
@@ -2457,6 +2722,120 @@ document.addEventListener('DOMContentLoaded', () => {
         if (confirmBtn) confirmBtn.style.display = modalConfirmPrevDisplay || '';
         if (messageEl) messageEl.innerHTML = '';
         if (container) container.style.display = 'none';
+    }
+
+    async function resolveImportedTrack(entry) {
+        const query = `${entry.name} ${entry.artist || ''}`.trim();
+        let tracks = await fetchCatalogTracks(query, 8);
+        if (!tracks.length) tracks = await fetchCatalogTracks(entry.name, 8);
+        if (!tracks.length) tracks = await fetchAudiusCatalogFallback(query, 8);
+        if (!tracks.length) return null;
+
+        const picked = pickCuratedMatch(tracks, {
+            name: entry.name || query,
+            artist: entry.artist || ''
+        });
+        if (picked?.track && picked.score >= 0.4) return picked.track;
+        return tracks[0] || null;
+    }
+
+    async function importFromApps(rawText, playlistName) {
+        const entries = parseImportedTrackEntries(rawText).slice(0, 80);
+        if (!entries.length) {
+            showToast('Paste track list text or CSV first', 'fa-file-import');
+            return;
+        }
+
+        const plName = (playlistName || '').trim() || `Imported ${new Date().toLocaleDateString()}`;
+        const plIndex = await createUserPlaylist(plName);
+        if (plIndex < 0) return;
+
+        const resolvedTracks = [];
+        let misses = 0;
+        for (const entry of entries) {
+            const match = await resolveImportedTrack(entry);
+            if (match) resolvedTracks.push(match);
+            else misses += 1;
+        }
+
+        const added = await addTracksToUserPlaylistBatch(plIndex, resolvedTracks);
+        if (added > 0) {
+            showToast(`Imported ${added} tracks${misses ? ` (${misses} not found)` : ''}`, 'fa-check-circle');
+            showPlaylist(plIndex);
+        } else {
+            showToast('Could not import tracks from that list', 'fa-exclamation-triangle');
+        }
+    }
+
+    function showImportFromAppsModal() {
+        if (!isUserLoggedIn()) {
+            showToast('Log in to import playlists', 'fa-user-lock');
+            ppRoutes().go('login');
+            return;
+        }
+
+        const container = document.getElementById('modal-container');
+        const titleEl = document.getElementById('modal-title');
+        const messageEl = document.getElementById('modal-message');
+        const inputEl = document.getElementById('modal-input');
+        const confirmBtn = document.getElementById('modal-confirm');
+        const cancelBtn = document.getElementById('modal-cancel');
+        if (!container || !titleEl || !messageEl || !inputEl || !confirmBtn || !cancelBtn) return;
+
+        titleEl.textContent = 'Import from Spotify & Apps';
+        messageEl.innerHTML = `
+            <div class="import-apps-panel">
+                <p>Use TuneMyMusic to export tracks from Spotify, Apple Music, YouTube Music, and more.</p>
+                <button type="button" class="import-tmm-btn" id="open-tmm-btn"><i class="fas fa-external-link-alt"></i> Open TuneMyMusic</button>
+                <textarea id="import-tracks-text" class="import-tracks-text" placeholder="Paste exported track list here (CSV or lines like: Song, Artist)."></textarea>
+                <label class="import-file-label">
+                    <input type="file" id="import-tracks-file" accept=".txt,.csv,text/plain,text/csv">
+                    <i class="fas fa-file-upload"></i> Load TXT/CSV file
+                </label>
+            </div>
+        `;
+        inputEl.style.display = 'block';
+        inputEl.value = `Imported from Apps ${new Date().toLocaleDateString()}`;
+        inputEl.placeholder = 'Playlist name';
+        confirmBtn.style.display = 'inline-flex';
+        confirmBtn.textContent = 'Import';
+        cancelBtn.textContent = 'Cancel';
+        container.style.display = 'flex';
+
+        const openTmm = document.getElementById('open-tmm-btn');
+        openTmm?.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.open('https://www.tunemymusic.com/', '_blank', 'noopener,noreferrer');
+        });
+
+        const tracksTextEl = document.getElementById('import-tracks-text');
+        const fileEl = document.getElementById('import-tracks-file');
+        fileEl?.addEventListener('change', async (e) => {
+            const file = e.target?.files?.[0];
+            if (!file) return;
+            const text = await file.text();
+            if (tracksTextEl) tracksTextEl.value = text;
+        });
+
+        confirmBtn.onclick = async () => {
+            const raw = tracksTextEl?.value || '';
+            const plName = inputEl.value || '';
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Importing...';
+            await importFromApps(raw, plName);
+            container.style.display = 'none';
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = 'Confirm';
+            inputEl.style.display = 'none';
+            messageEl.textContent = '';
+        };
+        cancelBtn.onclick = () => {
+            container.style.display = 'none';
+            inputEl.style.display = 'none';
+            confirmBtn.textContent = 'Confirm';
+            cancelBtn.textContent = 'Cancel';
+            messageEl.textContent = '';
+        };
     }
 
     function showAddToPlaylistPicker(rawTrack) {
@@ -2576,7 +2955,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.fetchTrackLyrics = fetchTrackLyrics;
 
-    function attachCardActions(card, track, plIndex, tIdx) {
+    function attachCardActions(card, track, plIndex, tIdx, options = {}) {
         card.classList.add('card--has-menu');
         const menu = document.createElement('button');
         menu.type = 'button';
@@ -2588,9 +2967,26 @@ document.addEventListener('DOMContentLoaded', () => {
             showAddToPlaylistPicker(track);
         };
         card.appendChild(menu);
+
+        if (options.showFeedback) {
+            const actions = document.createElement('div');
+            actions.className = 'card-feedback-actions';
+            actions.innerHTML = `
+                <button type="button" class="card-feedback-btn" data-fb="boost" aria-label="Recommend more like this"><i class="fas fa-thumbs-up"></i> More like this</button>
+                <button type="button" class="card-feedback-btn" data-fb="hide" aria-label="Not interested"><i class="fas fa-ban"></i> Not interested</button>
+            `;
+            actions.querySelectorAll('.card-feedback-btn').forEach((btn) => {
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    const mode = btn.getAttribute('data-fb');
+                    if (mode) applyTrackFeedback(track, mode);
+                };
+            });
+            card.appendChild(actions);
+        }
     }
 
-    function createTrackCard(track, plIndex, tIdx) {
+    function createTrackCard(track, plIndex, tIdx, options = {}) {
         const card = document.createElement('div');
         card.className = 'card audius-card';
         const art = track.art || DEFAULT_ART_URL;
@@ -2602,10 +2998,10 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="card-desc">${buildTrackMetaLine(track)}</div>
         `;
         card.onclick = (e) => {
-            if (e.target.closest('.meta-link, .card-more-btn')) return;
+            if (e.target.closest('.meta-link, .card-more-btn, .card-feedback-btn')) return;
             playTrack(plIndex, tIdx);
         };
-        attachCardActions(card, track, plIndex, tIdx);
+        attachCardActions(card, track, plIndex, tIdx, options);
         return card;
     }
 
@@ -2625,12 +3021,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return section.querySelector('.home-section-grid');
     }
 
-    function renderTrackRow(parent, title, subtitle, tracks, playlistId) {
+    function renderTrackRow(parent, title, subtitle, tracks, playlistId, options = {}) {
         if (!tracks?.length) return;
         const organizedTracks = organizeTracksForSelection(tracks, tracks.length);
         const grid = appendHomeSection(parent, title, subtitle);
         const plIndex = upsertTempPlaylist(playlistId, title, organizedTracks);
-        organizedTracks.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx)));
+        organizedTracks.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx, options.cardOptions)));
     }
 
     function normalizeTitleKey(name) {
@@ -2854,9 +3250,26 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.currentView !== 'home') return;
 
         const history = getPlayHistory().slice(0, 12);
+        let forYouTracks = [];
+        try {
+            forYouTracks = await fetchForYouTracks(feed, history);
+        } catch (e) {
+            console.warn('For You generation failed', e);
+        }
         cardGrid.innerHTML = '';
 
         if (!isLoggedIn) renderHomeLoginBanner(cardGrid);
+
+        if (forYouTracks.length) {
+            renderTrackRow(
+                cardGrid,
+                'For you',
+                'Based on your listens, likes, and feedback',
+                forYouTracks,
+                'home_for_you',
+                { cardOptions: { showFeedback: true } }
+            );
+        }
 
         if (history.length) {
             renderTrackRow(cardGrid, 'Continue listening', 'Pick up where you left off', history, 'home_continue');

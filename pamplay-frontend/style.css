@@ -1231,6 +1231,62 @@ body.player-bar-hidden .player-bar {
     box-shadow: 0 0 0 4px rgba(255, 0, 0, 0.1);
 }
 
+.import-apps-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    text-align: left;
+}
+
+.import-apps-panel p {
+    margin: 0;
+    color: var(--text-subdued);
+    font-size: 14px;
+}
+
+.import-tmm-btn {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.07);
+    color: #fff;
+    border-radius: 10px;
+    padding: 9px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.import-tmm-btn:hover {
+    background: rgba(255, 0, 0, 0.2);
+}
+
+.import-tracks-text {
+    width: 100%;
+    min-height: 140px;
+    resize: vertical;
+    border-radius: 10px;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.04);
+    color: #fff;
+    padding: 12px;
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.import-file-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-subdued);
+    cursor: pointer;
+}
+
+.import-file-label input {
+    display: none;
+}
+
 /* Liked Songs Sidebar Item */
 .liked-songs-item {
     display: flex !important;
