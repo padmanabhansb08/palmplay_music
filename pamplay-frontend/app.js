@@ -2761,7 +2761,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getSpotifyRedirectUri() {
-        return `${location.origin}${location.pathname}`;
+        const homePath = ppRoutes()?.page?.('home') || '/pamplay-frontend/home.html';
+        return `${location.origin}${homePath}`;
     }
 
     function loadSpotifyTokens() {
@@ -2929,28 +2930,59 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function formatImportEntryLabel(entry) {
+        if (!entry) return 'Unknown track';
+        const name = (entry.name || '').trim();
+        const artist = (entry.artist || '').trim();
+        return artist ? `${name} — ${artist}` : name;
+    }
+
     async function resolveEntriesToTracks(entries, maxEntries = 350) {
         const capped = dedupeImportEntries(entries).slice(0, maxEntries);
         const out = [];
         let misses = 0;
+        const missingEntries = [];
         const batch = 5;
         for (let i = 0; i < capped.length; i += batch) {
             const chunk = capped.slice(i, i + batch);
-            const resolved = await Promise.all(chunk.map((entry) => resolveImportedTrack(entry).catch(() => null)));
-            resolved.forEach((track) => {
-                if (track) out.push(track);
-                else misses += 1;
+            const resolved = await Promise.all(chunk.map(async (entry) => {
+                try {
+                    const track = await resolveImportedTrack(entry);
+                    return { entry, track, reason: track ? '' : 'No match in catalog' };
+                } catch {
+                    return { entry, track: null, reason: 'Lookup failed' };
+                }
+            }));
+            resolved.forEach(({ entry, track, reason }) => {
+                if (track) {
+                    out.push(track);
+                } else {
+                    misses += 1;
+                    missingEntries.push({
+                        label: formatImportEntryLabel(entry),
+                        reason
+                    });
+                }
             });
         }
-        return { tracks: out, misses };
+        return { tracks: out, misses, missingEntries };
     }
 
     async function importEntriesAsPlaylist(entries, playlistName) {
         const plIndex = await createUserPlaylist(playlistName);
-        if (plIndex < 0) return { added: 0, misses: entries.length };
-        const { tracks, misses } = await resolveEntriesToTracks(entries);
+        if (plIndex < 0) {
+            return {
+                added: 0,
+                misses: entries.length,
+                missingEntries: entries.map((entry) => ({
+                    label: formatImportEntryLabel(entry),
+                    reason: 'Playlist creation failed'
+                }))
+            };
+        }
+        const { tracks, misses, missingEntries } = await resolveEntriesToTracks(entries);
         const added = await addTracksToUserPlaylistBatch(plIndex, tracks);
-        return { plIndex, added, misses };
+        return { plIndex, added, misses, missingEntries };
     }
 
     function showTransferProgressModal() {
@@ -2994,7 +3026,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function finishTransferProgress({ added = 0, misses = 0, playlists = 0, plIndex = -1 }) {
+    function finishTransferProgress({ added = 0, misses = 0, playlists = 0, plIndex = -1, logs = [] }) {
         const iconWrap = document.querySelector('.transfer-flow-icon');
         const messageEl = document.getElementById('modal-message');
         if (iconWrap) iconWrap.innerHTML = '<i class="fas fa-check-circle"></i>';
@@ -3012,12 +3044,59 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div><strong>${added}</strong> tracks added</div>
                 <div><strong>${misses}</strong> unavailable</div>
                 <button type="button" class="transfer-open-btn" id="transfer-open-btn">Open Imported Library</button>
+                <button type="button" class="transfer-log-toggle" id="transfer-log-toggle">View Transfer Logs</button>
+                <div class="transfer-log-panel" id="transfer-log-panel" hidden>
+                    <div class="transfer-log-head">
+                        <span>Unavailable tracks</span>
+                        <button type="button" class="transfer-log-copy" id="transfer-log-copy">Copy logs</button>
+                    </div>
+                    <div class="transfer-log-list" id="transfer-log-list"></div>
+                </div>
             `;
             messageEl.appendChild(footer);
             document.getElementById('transfer-open-btn')?.addEventListener('click', () => {
                 if (plIndex >= 0) showPlaylist(plIndex);
                 const container = document.getElementById('modal-container');
                 if (container) container.style.display = 'none';
+            });
+            const logBtn = document.getElementById('transfer-log-toggle');
+            const logPanel = document.getElementById('transfer-log-panel');
+            const logList = document.getElementById('transfer-log-list');
+            const copyBtn = document.getElementById('transfer-log-copy');
+            const normalizedLogs = Array.isArray(logs) ? logs : [];
+            if (logList) {
+                if (!normalizedLogs.length) {
+                    logList.innerHTML = '<div class="transfer-log-empty">No unavailable tracks. Everything matched.</div>';
+                } else {
+                    logList.innerHTML = normalizedLogs.map((item) => `
+                        <div class="transfer-log-row">
+                            <div class="transfer-log-track">${escapeHtml(item.track || 'Unknown')}</div>
+                            <div class="transfer-log-meta">${escapeHtml(item.playlist || 'Library')} · ${escapeHtml(item.reason || 'Unavailable')}</div>
+                        </div>
+                    `).join('');
+                }
+            }
+            logBtn?.addEventListener('click', () => {
+                if (!logPanel) return;
+                const hidden = logPanel.hasAttribute('hidden');
+                if (hidden) {
+                    logPanel.removeAttribute('hidden');
+                    logBtn.textContent = 'Hide Transfer Logs';
+                } else {
+                    logPanel.setAttribute('hidden', '');
+                    logBtn.textContent = 'View Transfer Logs';
+                }
+            });
+            copyBtn?.addEventListener('click', async () => {
+                const text = normalizedLogs.length
+                    ? normalizedLogs.map((item) => `[${item.playlist || 'Library'}] ${item.track} — ${item.reason || 'Unavailable'}`).join('\n')
+                    : 'No unavailable tracks. Everything matched.';
+                try {
+                    await navigator.clipboard.writeText(text);
+                    showToast('Transfer logs copied', 'fa-copy');
+                } catch {
+                    showToast('Could not copy logs', 'fa-exclamation-triangle');
+                }
             });
         }
     }
@@ -3047,6 +3126,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let totalMisses = 0;
         let lastPlaylistIndex = -1;
         let importedPlaylistCount = 0;
+        const transferLogs = [];
 
         if (likedEntries.length) {
             updateTransferProgress('Matching tracks...', 'Matching liked songs in PalmPlay catalog.', 36);
@@ -3055,6 +3135,13 @@ document.addEventListener('DOMContentLoaded', () => {
             totalMisses += likedResult.misses || 0;
             lastPlaylistIndex = likedResult.plIndex ?? lastPlaylistIndex;
             if ((likedResult.added || 0) > 0) importedPlaylistCount += 1;
+            (likedResult.missingEntries || []).forEach((miss) => {
+                transferLogs.push({
+                    playlist: 'Spotify Liked Songs',
+                    track: miss.label,
+                    reason: miss.reason
+                });
+            });
         }
 
         const totalPlaylists = Math.max(1, playlistsMeta.length);
@@ -3073,6 +3160,13 @@ document.addEventListener('DOMContentLoaded', () => {
             totalMisses += result.misses || 0;
             if (typeof result.plIndex === 'number') lastPlaylistIndex = result.plIndex;
             if ((result.added || 0) > 0) importedPlaylistCount += 1;
+            (result.missingEntries || []).forEach((miss) => {
+                transferLogs.push({
+                    playlist: pl.name,
+                    track: miss.label,
+                    reason: miss.reason
+                });
+            });
         }
 
         if (totalAdded > 0) {
@@ -3081,7 +3175,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 added: totalAdded,
                 misses: totalMisses,
                 playlists: importedPlaylistCount,
-                plIndex: lastPlaylistIndex
+                plIndex: lastPlaylistIndex,
+                logs: transferLogs
             });
         } else {
             showToast('No Spotify tracks matched our catalog', 'fa-exclamation-triangle');
@@ -3089,7 +3184,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 added: 0,
                 misses: totalMisses,
                 playlists: 0,
-                plIndex: -1
+                plIndex: -1,
+                logs: transferLogs
             });
         }
     }
