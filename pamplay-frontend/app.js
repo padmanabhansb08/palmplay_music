@@ -7,7 +7,7 @@ const AUDIUS_DISCOVERY_URL = _env.AUDIUS_DISCOVERY_URL || 'https://api.audius.co
 const AUDIUS_APP_NAME = _env.AUDIUS_APP_NAME || 'PalmPlay';
 const MUSIC_CATALOG_API_BASE = (_catalog.apiBase || '').trim().replace(/\/$/, '');
 const DEFAULT_ART_URL = _env.DEFAULT_ART_URL || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
-const SPOTIFY_CLIENT_ID = (_env.SPOTIFY_CLIENT_ID || '').trim();
+const SPOTIFY_CLIENT_ID = (_env.SPOTIFY_CLIENT_ID || 'c6177a0758d04a8582e59cd86bd18fbf').trim();
 
 const TRAFFIC_LIMITS = {
     requestsPerMinute: Math.max(5, parseInt(_env.CATALOG_REQUESTS_PER_MINUTE, 10) || 30),
