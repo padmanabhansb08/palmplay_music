@@ -11,6 +11,10 @@
     padding-bottom: calc(var(--player-height) + var(--bottom-nav-height) + var(--safe-bottom));
 }
 
+body.player-bar-hidden #app {
+    padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom));
+}
+
 body.player-expanded #app {
     padding-bottom: calc(var(--player-expanded-height) + var(--bottom-nav-height) + var(--safe-bottom));
 }
@@ -713,6 +717,27 @@ body.now-playing-open {
     font-weight: 700;
 }
 
+.queue-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#queue-clear {
+    border: 1px solid var(--glass-border);
+    background: transparent;
+    color: var(--text-subdued);
+    border-radius: 999px;
+    font-size: 12px;
+    padding: 5px 10px;
+    cursor: pointer;
+}
+
+#queue-clear:hover {
+    color: var(--text-main);
+    border-color: rgba(255, 255, 255, 0.22);
+}
+
 .queue-list {
     flex: 1;
     overflow-y: auto;
@@ -737,6 +762,15 @@ body.now-playing-open {
     background: rgba(255, 0, 0, 0.12);
 }
 
+.queue-item.drag-over {
+    outline: 1px dashed rgba(255, 255, 255, 0.35);
+    outline-offset: -1px;
+}
+
+.queue-item.dragging {
+    opacity: 0.55;
+}
+
 .queue-item-art {
     width: 48px;
     height: 48px;
@@ -749,6 +783,31 @@ body.now-playing-open {
 .queue-item-info {
     min-width: 0;
     flex: 1;
+}
+
+.queue-now-label {
+    font-size: 11px;
+    color: var(--primary);
+    border: 1px solid rgba(255, 26, 26, 0.4);
+    border-radius: 999px;
+    padding: 3px 8px;
+    flex-shrink: 0;
+}
+
+.queue-remove-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 0;
+    background: transparent;
+    color: var(--text-subdued);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.queue-remove-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-main);
 }
 
 .queue-item-name {

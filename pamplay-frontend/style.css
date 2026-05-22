@@ -160,6 +160,10 @@ body {
     height: 100vh;
 }
 
+body.player-bar-hidden #app {
+    grid-template-rows: 1fr 0;
+}
+
 /* Allow footer to span full width */
 #app>footer {
     grid-row: 2;
@@ -715,6 +719,17 @@ body.lang-view-active .top-header .search-container.premium-search {
     position: relative;
     min-height: 62px;
     box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.35);
+    transition: min-height 0.25s var(--ease-smooth), padding 0.25s var(--ease-smooth), opacity 0.2s var(--ease-smooth);
+}
+
+body.player-bar-hidden .player-bar {
+    min-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-top: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
 }
 
 .track-info {

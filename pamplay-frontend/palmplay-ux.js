@@ -104,7 +104,10 @@
                 q.innerHTML = `
                     <div class="queue-drawer-header">
                         <h3>Up next</h3>
-                        <button type="button" id="queue-close" aria-label="Close queue"><i class="fas fa-times"></i></button>
+                        <div class="queue-header-actions">
+                            <button type="button" id="queue-clear" aria-label="Clear upcoming">Clear</button>
+                            <button type="button" id="queue-close" aria-label="Close queue"><i class="fas fa-times"></i></button>
+                        </div>
                     </div>
                     <div class="queue-list" id="queue-list"></div>
                 `;
@@ -366,6 +369,12 @@
             };
             document.getElementById('queue-btn')?.addEventListener('click', () => this.toggleQueue());
             document.getElementById('queue-close')?.addEventListener('click', close);
+            document.getElementById('queue-clear')?.addEventListener('click', () => {
+                if (window.PalmPlayQueue?.clearUpcoming) {
+                    window.PalmPlayQueue.clearUpcoming();
+                    this.renderQueue();
+                }
+            });
             window.addEventListener('palmplay:trackchange', () => {
                 if (this.queueOpen) this.renderQueue();
             });
@@ -395,12 +404,13 @@
                 return;
             }
             list.innerHTML = items.map((item, i) => `
-                <div class="queue-item ${item.isCurrent ? 'playing' : ''}" data-q-pl="${item.plIndex}" data-q-ti="${item.tIndex}">
+                <div class="queue-item ${item.isCurrent ? 'playing' : ''}" data-q-pos="${item.qPos ?? i}" data-q-pl="${item.plIndex}" data-q-ti="${item.tIndex}" draggable="${item.isCurrent ? 'false' : 'true'}">
                     <div class="queue-item-art" style="background-image:url(${item.art})"></div>
                     <div class="queue-item-info">
                         <div class="queue-item-name">${item.name}</div>
                         <div class="queue-item-artist">${item.artist}</div>
                     </div>
+                    ${item.isCurrent ? '<span class="queue-now-label">Now</span>' : '<button type="button" class="queue-remove-btn" aria-label="Remove from queue"><i class="fas fa-times"></i></button>'}
                 </div>
             `).join('');
             list.querySelectorAll('.queue-item').forEach((el) => {
@@ -409,6 +419,35 @@
                     const ti = parseInt(el.dataset.qTi, 10);
                     if (window.PalmPlayQueue.playAt) window.PalmPlayQueue.playAt(pl, ti);
                 };
+                const remove = el.querySelector('.queue-remove-btn');
+                if (remove) {
+                    remove.onclick = (e) => {
+                        e.stopPropagation();
+                        const pos = parseInt(el.dataset.qPos, 10);
+                        if (window.PalmPlayQueue?.removeAt?.(pos)) this.renderQueue();
+                    };
+                }
+                if (el.getAttribute('draggable') === 'true') {
+                    el.addEventListener('dragstart', (e) => {
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', el.dataset.qPos || '');
+                        el.classList.add('dragging');
+                    });
+                    el.addEventListener('dragend', () => el.classList.remove('dragging'));
+                    el.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        el.classList.add('drag-over');
+                    });
+                    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+                    el.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        el.classList.remove('drag-over');
+                        const fromPos = parseInt(e.dataTransfer.getData('text/plain'), 10);
+                        const toPos = parseInt(el.dataset.qPos, 10);
+                        if (Number.isNaN(fromPos) || Number.isNaN(toPos)) return;
+                        if (window.PalmPlayQueue?.reorder?.(fromPos, toPos)) this.renderQueue();
+                    });
+                }
             });
         },
 

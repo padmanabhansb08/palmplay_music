@@ -99,7 +99,10 @@ const state = {
     playbackSpeed: 1.0,
     gestureMode: false,
     isBuffering: false,
-    recentPlayback: []
+    recentPlayback: [],
+    queueIndices: [],
+    queuePlaylistKey: null,
+    queueExplicit: false
 };
 
 // Database Initialization
@@ -557,17 +560,56 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.currentPlaylistIndex < 0) return [];
             const pl = playlists[state.currentPlaylistIndex];
             if (!pl?.tracks?.length) return [];
-            return pl.tracks.map((t, ti) => ({
+            const current = state.currentTrackIndex;
+            ensureQueueForCurrentTrack(state.currentPlaylistIndex, current, { keepExisting: true });
+            const indices = (state.queueIndices?.length ? state.queueIndices : buildDefaultQueueIndices(state.currentPlaylistIndex, current))
+                .filter((ti) => ti >= current && ti < pl.tracks.length);
+            return indices.map((ti, pos) => {
+                const t = pl.tracks[ti];
+                return ({
                 plIndex: state.currentPlaylistIndex,
+                qPos: pos,
                 tIndex: ti,
                 name: t.name,
                 artist: t.artist,
                 art: t.art || DEFAULT_ART_URL,
-                isCurrent: ti === state.currentTrackIndex
-            })).filter((_, ti) => ti >= state.currentTrackIndex);
+                isCurrent: pos === 0
+                });
+            });
         },
         playAt(plIndex, tIndex) {
-            playTrack(plIndex, tIndex);
+            if (plIndex !== state.currentPlaylistIndex) {
+                playTrack(plIndex, tIndex);
+                return;
+            }
+            const pos = state.queueIndices.indexOf(tIndex);
+            if (pos > 0) {
+                setQueueIndices(plIndex, tIndex, state.queueIndices.slice(pos), true);
+                playTrack(plIndex, tIndex, { fromQueue: true });
+                return;
+            }
+            playTrack(plIndex, tIndex, { fromQueue: true });
+        },
+        removeAt(queuePos) {
+            if (state.currentPlaylistIndex < 0) return false;
+            if (queuePos <= 0) return false; // don't remove currently playing item
+            const next = state.queueIndices.filter((_, i) => i !== queuePos);
+            setQueueIndices(state.currentPlaylistIndex, state.currentTrackIndex, next, true);
+            return true;
+        },
+        clearUpcoming() {
+            if (state.currentPlaylistIndex < 0) return;
+            setQueueIndices(state.currentPlaylistIndex, state.currentTrackIndex, [state.currentTrackIndex], true);
+        },
+        reorder(fromPos, toPos) {
+            if (state.currentPlaylistIndex < 0) return false;
+            const len = state.queueIndices.length;
+            if (fromPos <= 0 || toPos <= 0 || fromPos >= len || toPos >= len) return false;
+            const copy = state.queueIndices.slice();
+            const [moved] = copy.splice(fromPos, 1);
+            copy.splice(toPos, 0, moved);
+            setQueueIndices(state.currentPlaylistIndex, state.currentTrackIndex, copy, true);
+            return true;
         }
     };
 
@@ -1407,10 +1449,108 @@ document.addEventListener('DOMContentLoaded', () => {
     const PLAY_HISTORY_MAX = 50;
     const RECENT_SEARCHES_KEY = 'palmplay_recent_searches';
     const RECENT_SEARCHES_MAX = 15;
+    const QUEUE_STATE_KEY = 'palmplay_queue_state_v1';
     let playbackRecoveryLock = false;
     let playRequestToken = 0;
     let autoSkipAttempts = 0;
     let spotifyAllTimePoolCache = null;
+
+    function getQueuePlaylistKey(plIndex) {
+        const pl = playlists[plIndex];
+        if (!pl) return null;
+        return String(pl.id ?? `idx_${plIndex}`);
+    }
+
+    function buildDefaultQueueIndices(plIndex, currentIndex) {
+        const pl = playlists[plIndex];
+        if (!pl?.tracks?.length || currentIndex < 0) return [];
+        const indices = [];
+        for (let i = currentIndex; i < pl.tracks.length; i++) indices.push(i);
+        return indices;
+    }
+
+    function saveQueueState() {
+        try {
+            if (!state.queuePlaylistKey || !state.queueIndices.length) {
+                localStorage.removeItem(QUEUE_STATE_KEY);
+                return;
+            }
+            localStorage.setItem(QUEUE_STATE_KEY, JSON.stringify({
+                key: state.queuePlaylistKey,
+                indices: state.queueIndices,
+                explicit: !!state.queueExplicit
+            }));
+        } catch (e) {
+            console.warn('Queue state save failed', e);
+        }
+    }
+
+    function loadQueueState() {
+        try {
+            const raw = localStorage.getItem(QUEUE_STATE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || !Array.isArray(parsed.indices) || !parsed.key) return null;
+            return parsed;
+        } catch {
+            return null;
+        }
+    }
+
+    function setQueueIndices(plIndex, currentIndex, customIndices, explicit = false) {
+        const key = getQueuePlaylistKey(plIndex);
+        const pl = playlists[plIndex];
+        if (!key || !pl?.tracks?.length) {
+            state.queuePlaylistKey = null;
+            state.queueIndices = [];
+            state.queueExplicit = false;
+            saveQueueState();
+            return;
+        }
+        const valid = [];
+        const seen = new Set();
+        const source = Array.isArray(customIndices) ? customIndices : buildDefaultQueueIndices(plIndex, currentIndex);
+        source.forEach((idx) => {
+            const n = Number(idx);
+            if (!Number.isInteger(n)) return;
+            if (n < currentIndex || n >= pl.tracks.length) return;
+            if (seen.has(n)) return;
+            seen.add(n);
+            valid.push(n);
+        });
+        if (!valid.length || valid[0] !== currentIndex) {
+            valid.unshift(currentIndex);
+        }
+        state.queuePlaylistKey = key;
+        state.queueIndices = valid;
+        state.queueExplicit = !!explicit;
+        saveQueueState();
+    }
+
+    function ensureQueueForCurrentTrack(plIndex, currentIndex, opts = {}) {
+        const key = getQueuePlaylistKey(plIndex);
+        const forceReset = !!opts.forceReset;
+        const keepExisting = !!opts.keepExisting;
+        if (!key) return;
+        const shouldRestore = !state.queueIndices.length && !forceReset;
+        if (shouldRestore) {
+            const persisted = loadQueueState();
+            if (persisted?.key === key) {
+                setQueueIndices(plIndex, currentIndex, persisted.indices, !!persisted.explicit);
+                return;
+            }
+        }
+        if (forceReset || state.queuePlaylistKey !== key || !keepExisting) {
+            setQueueIndices(plIndex, currentIndex, null, false);
+            return;
+        }
+        if (!state.queueIndices.includes(currentIndex)) {
+            setQueueIndices(plIndex, currentIndex, null, false);
+        } else {
+            const pos = state.queueIndices.indexOf(currentIndex);
+            setQueueIndices(plIndex, currentIndex, state.queueIndices.slice(pos), state.queueExplicit);
+        }
+    }
 
     function escapeHtml(str) {
         const d = document.createElement('div');
@@ -1895,7 +2035,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function prefetchUpcomingTrack(plIndex, tIndex) {
         const pl = playlists[plIndex];
         if (!pl?.tracks?.length || pl.tracks.length < 2) return;
-        const nextIdx = (tIndex + 1) % pl.tracks.length;
+        ensureQueueForCurrentTrack(plIndex, tIndex, { keepExisting: true });
+        const queuedNext = state.queueIndices.length > 1 ? state.queueIndices[1] : null;
+        const nextIdx = Number.isInteger(queuedNext) ? queuedNext : (tIndex + 1) % pl.tracks.length;
         if (nextIdx === tIndex) return;
         const next = pl.tracks[nextIdx];
         if (!next || next.audioBlob || next.url || next._unplayable) return;
@@ -2935,10 +3077,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function playTrack(plIndex, tIndex, opts = {}) {
         const autoNext = !!opts.autoNext;
+        const fromQueue = !!opts.fromQueue;
         if (playbackRecoveryLock) return;
         const token = ++playRequestToken;
         state.currentPlaylistIndex = plIndex;
         state.currentTrackIndex = tIndex;
+        ensureQueueForCurrentTrack(plIndex, tIndex, {
+            forceReset: !autoNext && !fromQueue,
+            keepExisting: autoNext || fromQueue
+        });
         state.isBuffering = true;
         updatePlayerUI();
         let track = playlists[plIndex]?.tracks?.[tIndex];
@@ -3077,6 +3224,20 @@ document.addEventListener('DOMContentLoaded', () => {
     function playNext(allowWrap = true) {
         if (state.currentPlaylistIndex === -1) return;
         const pl = playlists[state.currentPlaylistIndex];
+        ensureQueueForCurrentTrack(state.currentPlaylistIndex, state.currentTrackIndex, { keepExisting: true });
+
+        if (state.queueIndices.length > 1) {
+            const nextIndex = state.queueIndices[1];
+            setQueueIndices(state.currentPlaylistIndex, nextIndex, state.queueIndices.slice(1), state.queueExplicit);
+            playTrack(state.currentPlaylistIndex, nextIndex, { autoNext: true, fromQueue: true });
+            return;
+        }
+
+        if (state.queueExplicit && state.queueIndices.length <= 1) {
+            state.isPlaying = false;
+            updatePlayerUI();
+            return;
+        }
 
         if (state.isShuffle) {
             const currentArtist = primaryArtistKey(pl.tracks[state.currentTrackIndex]?.artist);
@@ -3214,6 +3375,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (state.currentPlaylistIndex === -1) {
+            document.body.classList.add('player-bar-hidden');
             trackNameEl.textContent = "Select a song";
             artistNameEl.textContent = "Discover music below";
             document.body.classList.remove('player-expanded');
@@ -3221,6 +3383,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        document.body.classList.remove('player-bar-hidden');
         const track = playlists[state.currentPlaylistIndex].tracks[state.currentTrackIndex];
         if (!trackNameEl.getAttribute('aria-live')) {
             trackNameEl.setAttribute('aria-live', 'polite');
