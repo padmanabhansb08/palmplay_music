@@ -98,6 +98,7 @@ const state = {
     isMuted: false,
     playbackSpeed: 1.0,
     gestureMode: false,
+    isBuffering: false,
     recentPlayback: []
 };
 
@@ -337,6 +338,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileInput = document.querySelector('#file-input');
     const folderInput = document.querySelector('#folder-input');
 
+    function setHeaderSearchVisible(visible) {
+        if (!searchContainer) return;
+        if (visible) {
+            searchContainer.style.removeProperty('display');
+            searchContainer.style.display = 'flex';
+            searchContainer.classList.add('header-search--always');
+        } else {
+            searchContainer.style.setProperty('display', 'none', 'important');
+            searchContainer.classList.remove('header-search--always');
+        }
+    }
+
     // Global Dropdown Helpers
     window.handleProfileAction = (action) => {
         const dropdown = document.getElementById('profile-dropdown');
@@ -510,10 +523,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (view === 'search') {
                 state.currentView = 'search';
-                if (searchContainer) {
-                    searchContainer.style.display = 'flex';
-                    searchContainer.classList.add('header-search--always');
-                }
+                setHeaderSearchVisible(true);
                 if (viewHeader) viewHeader.style.display = 'none';
                 if (exploreHero) exploreHero.style.display = 'none';
                 if (categoryChips) categoryChips.style.display = 'none';
@@ -524,7 +534,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (view === 'explore' && onExplore) {
                 state.currentView = 'explore';
-                if (searchContainer) searchContainer.style.display = 'flex';
+                setHeaderSearchVisible(true);
                 if (viewHeader) viewHeader.style.display = 'block';
                 if (exploreHero) exploreHero.style.display = 'flex';
                 if (categoryChips) categoryChips.style.display = 'flex';
@@ -535,7 +545,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             state.currentView = 'home';
-            if (searchContainer && !onExplore) searchContainer.style.display = 'none';
+            if (!onExplore) setHeaderSearchVisible(false);
             if (viewHeader) viewHeader.style.display = 'block';
             renderHome();
             window.PalmPlayUX?.activateBottomNav?.('home');
@@ -1014,6 +1024,69 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Bars
         progressBar.addEventListener('click', seek);
+        let isScrubbing = false;
+        const scrubToClientX = (clientX) => {
+            if (!audio.src || !audio.duration) return;
+            const rect = progressBar.getBoundingClientRect();
+            const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+            audio.currentTime = pos * audio.duration;
+        };
+        const startScrub = (clientX) => {
+            if (!audio.src || !audio.duration) return;
+            isScrubbing = true;
+            scrubToClientX(clientX);
+        };
+        const moveScrub = (clientX) => {
+            if (!isScrubbing) return;
+            scrubToClientX(clientX);
+        };
+        const endScrub = () => {
+            isScrubbing = false;
+        };
+
+        // Pointer events (modern browsers)
+        progressBar.addEventListener('pointerdown', (e) => {
+            startScrub(e.clientX);
+            progressBar.setPointerCapture?.(e.pointerId);
+            e.preventDefault();
+        });
+        progressBar.addEventListener('pointermove', (e) => moveScrub(e.clientX));
+        progressBar.addEventListener('pointerup', () => endScrub());
+        progressBar.addEventListener('pointercancel', () => endScrub());
+        progressBar.addEventListener('lostpointercapture', () => endScrub());
+
+        // Mouse fallback (ensures drag works even if pointer events are flaky)
+        progressBar.addEventListener('mousedown', (e) => {
+            startScrub(e.clientX);
+            e.preventDefault();
+        });
+        window.addEventListener('mousemove', (e) => moveScrub(e.clientX));
+        window.addEventListener('mouseup', () => endScrub());
+
+        // Touch fallback for mobile drag
+        progressBar.addEventListener('touchstart', (e) => {
+            const t = e.touches?.[0];
+            if (!t) return;
+            startScrub(t.clientX);
+            e.preventDefault();
+        }, { passive: false });
+        window.addEventListener('touchmove', (e) => {
+            if (!isScrubbing) return;
+            const t = e.touches?.[0];
+            if (!t) return;
+            moveScrub(t.clientX);
+            e.preventDefault();
+        }, { passive: false });
+        window.addEventListener('touchend', () => endScrub());
+        window.addEventListener('touchcancel', () => endScrub());
+
+        // Optional desktop wheel scrubbing: scroll over timeline to seek.
+        progressBar.addEventListener('wheel', (e) => {
+            if (!audio.src || !audio.duration) return;
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 5 : -5;
+            audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + delta));
+        }, { passive: false });
         volumeBar.addEventListener('click', setVolume);
 
         // Heart / Like Control
@@ -1123,6 +1196,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         audio.onplay = () => {
             state.isPlaying = true;
+            state.isBuffering = false;
             updatePlayerUI();
         };
 
@@ -1327,7 +1401,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v3';
+    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v4';
     const HOME_FEED_TTL_MS = 5 * 60 * 1000;
     const PLAY_HISTORY_KEY = 'palmplay_play_history';
     const PLAY_HISTORY_MAX = 50;
@@ -1335,6 +1409,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const RECENT_SEARCHES_MAX = 15;
     let playbackRecoveryLock = false;
     let playRequestToken = 0;
+    let autoSkipAttempts = 0;
+    let spotifyAllTimePoolCache = null;
 
     function escapeHtml(str) {
         const d = document.createElement('div');
@@ -1782,16 +1858,57 @@ document.addEventListener('DOMContentLoaded', () => {
         return match?.url || null;
     }
 
+    async function resolveTrackStreamSafe(track, forceRefresh = false, timeoutMs = 7000) {
+        return Promise.race([
+            resolveTrackStream(track, forceRefresh),
+            new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs))
+        ]);
+    }
+
     function markTrackUnplayable(plIndex, tIndex) {
         const t = playlists[plIndex]?.tracks?.[tIndex];
         if (t) t._unplayable = true;
     }
 
-    function onPlaybackFailed(track, plIndex, tIndex) {
+    function onPlaybackFailed(track, plIndex, tIndex, autoNext = false) {
         markTrackUnplayable(plIndex, tIndex);
         showToast(`Can't play "${track.name}" — try another track`, 'fa-exclamation-triangle');
+        state.isBuffering = false;
         state.isPlaying = false;
         updatePlayerUI();
+
+        if (!autoNext) return;
+        const pl = playlists[plIndex];
+        if (!pl?.tracks?.length || pl.tracks.length < 2) return;
+        autoSkipAttempts += 1;
+        const maxAttempts = Math.min(pl.tracks.length, 6);
+        if (autoSkipAttempts >= maxAttempts) {
+            showToast('Auto-next stopped: multiple tracks failed', 'fa-exclamation-circle');
+            autoSkipAttempts = 0;
+            return;
+        }
+        const nextIdx = (tIndex + 1) % pl.tracks.length;
+        if (nextIdx === tIndex) return;
+        setTimeout(() => playTrack(plIndex, nextIdx, { autoNext: true }), 150);
+    }
+
+    function prefetchUpcomingTrack(plIndex, tIndex) {
+        const pl = playlists[plIndex];
+        if (!pl?.tracks?.length || pl.tracks.length < 2) return;
+        const nextIdx = (tIndex + 1) % pl.tracks.length;
+        if (nextIdx === tIndex) return;
+        const next = pl.tracks[nextIdx];
+        if (!next || next.audioBlob || next.url || next._unplayable) return;
+
+        resolveTrackStream(next, false)
+            .then((url) => {
+                if (url) {
+                    pl.tracks[nextIdx].url = url;
+                }
+            })
+            .catch((e) => {
+                console.warn('Prefetch next track failed', e);
+            });
     }
 
     function buildTrackShareUrl(track) {
@@ -2000,9 +2117,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return { track: bestTrack, score: bestScore };
     }
 
-    async function fetchCuratedTrendingTracks() {
-        const list = window.PALMPLAY_CURATED_TRENDING || [];
-        if (!list.length) return fetchAudiusCatalogFallback('trending', 20);
+    async function fetchCuratedTrendingTracks(limit = 20) {
+        const list = (window.PALMPLAY_CURATED_TRENDING || []).slice(0, limit);
+        if (!list.length) return fetchAudiusCatalogFallback('trending', limit);
 
         const resolved = [];
         const batchSize = 4;
@@ -2039,7 +2156,14 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             resolved.push(...chunk.filter(Boolean));
         }
-        return resolved.length ? resolved : fetchAudiusCatalogFallback('trending', 20);
+        return resolved.length ? resolved : fetchAudiusCatalogFallback('trending', limit);
+    }
+
+    async function getSpotifyAllTimePool() {
+        if (spotifyAllTimePoolCache?.length) return spotifyAllTimePoolCache;
+        const tracks = await fetchCuratedTrendingTracks(80);
+        spotifyAllTimePoolCache = organizeTracksForSelection(tracks, 80);
+        return spotifyAllTimePoolCache;
     }
 
     async function fetchHomeFeed() {
@@ -2054,7 +2178,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const [trending, picks] = await Promise.all([
-            fetchCuratedTrendingTracks(),
+            fetchCuratedTrendingTracks(20),
             fetchCatalogTracks('latest hits', 12)
         ]);
 
@@ -2552,8 +2676,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function renderHome() {
+        document.body.classList.remove('lang-view-active');
         state.currentView = 'home';
-        searchContainer.style.display = 'none';
+        setHeaderSearchVisible(false);
         viewHeader.style.display = 'block';
         greetingEl.style.display = 'block';
         if (exploreHero) exploreHero.style.display = 'none';
@@ -2607,8 +2732,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function renderExplore(category) {
+        document.body.classList.remove('lang-view-active');
         state.currentView = 'explore';
-        searchContainer.style.display = 'none';
+        setHeaderSearchVisible(false);
         viewHeader.style.display = 'block';
         greetingEl.style.display = 'block';
         if (exploreHero) exploreHero.style.display = 'flex';
@@ -2682,6 +2808,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showPlaylist(plIndex) {
+        document.body.classList.remove('lang-view-active');
         state.currentView = 'playlist';
         const pl = playlists[plIndex];
 
@@ -2806,20 +2933,27 @@ document.addEventListener('DOMContentLoaded', () => {
         mainView.scrollTop = 0;
     }
 
-    async function playTrack(plIndex, tIndex) {
+    async function playTrack(plIndex, tIndex, opts = {}) {
+        const autoNext = !!opts.autoNext;
         if (playbackRecoveryLock) return;
         const token = ++playRequestToken;
         state.currentPlaylistIndex = plIndex;
         state.currentTrackIndex = tIndex;
+        state.isBuffering = true;
+        updatePlayerUI();
         let track = playlists[plIndex]?.tracks?.[tIndex];
-        if (!track) return;
+        if (!track) {
+            state.isBuffering = false;
+            updatePlayerUI();
+            return;
+        }
 
         let url = track.url;
         if (!url || track._unplayable) {
-            url = await resolveTrackStream(track, true);
+            url = await resolveTrackStreamSafe(track, true);
         }
         if (!url) {
-            onPlaybackFailed(track, plIndex, tIndex);
+            onPlaybackFailed(track, plIndex, tIndex, autoNext);
             return;
         }
 
@@ -2862,7 +2996,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (token !== playRequestToken) return;
         if (!ok) {
             playbackRecoveryLock = true;
-            const retryUrl = await resolveTrackStream(track, true);
+            const retryUrl = await resolveTrackStreamSafe(track, true);
             playbackRecoveryLock = false;
             if (token !== playRequestToken) return;
             if (retryUrl && retryUrl !== url) {
@@ -2881,10 +3015,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (!ok) {
-            onPlaybackFailed(track, plIndex, tIndex);
+            onPlaybackFailed(track, plIndex, tIndex, autoNext);
             return;
         }
 
+        autoSkipAttempts = 0;
+        state.isBuffering = false;
         state.isPlaying = true;
         updatePlayerUI();
         updateMediaSession(track);
@@ -2892,6 +3028,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.dispatchEvent(new CustomEvent('palmplay:trackchange', { detail: { plIndex, tIndex } }));
         recordPlayHistory(track);
         applyDynamicTheme(track.art);
+        prefetchUpcomingTrack(plIndex, tIndex);
 
         if (state.currentView === 'playlist') {
             const plMainPlayIcon = document.querySelector('#pl-main-play i');
@@ -2904,6 +3041,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function togglePlay() {
         if (!audio.src) return;
+        if (state.isBuffering) return;
         if (state.isPlaying) {
             audio.pause();
             state.isPlaying = false;
@@ -2972,7 +3110,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        playTrack(state.currentPlaylistIndex, state.currentTrackIndex);
+        playTrack(state.currentPlaylistIndex, state.currentTrackIndex, { autoNext: true });
     }
 
     function playPrev() {
@@ -3102,7 +3240,11 @@ document.addEventListener('DOMContentLoaded', () => {
             icon.style.color = liked ? 'var(--primary)' : '';
         }
 
-        playIcon.className = state.isPlaying ? 'fas fa-pause' : 'fas fa-play';
+        if (state.isBuffering) {
+            playIcon.className = 'fas fa-spinner fa-spin';
+        } else {
+            playIcon.className = state.isPlaying ? 'fas fa-pause' : 'fas fa-play';
+        }
 
         if (audio.duration) {
             timeTotal.textContent = formatTime(audio.duration);
@@ -3179,7 +3321,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return fetchAudiusCatalogFallback(query, limit);
             }
 
-            return results.map(t => {
+            const mapped = results.map(t => {
                 const parsed = parseCatalogSong(t);
                 if (!parsed) return null;
                 return {
@@ -3188,6 +3330,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     plays: Math.floor(Math.random() * 50000) + 10000
                 };
             }).filter(Boolean);
+            const q = normalizeSearchText(query);
+            const tokens = new Set(q.split(' ').filter(Boolean));
+            const score = (track) => {
+                const tn = normalizeSearchText(track.name);
+                const ta = normalizeSearchText(track.artist);
+                let s = 0;
+                if (tn === q) s += 120;
+                else if (tn.startsWith(q)) s += 90;
+                else if (tn.includes(q)) s += 70;
+                if (q.includes(ta) || ta.includes(q)) s += 25;
+                tokens.forEach((tk) => {
+                    if (tn.includes(tk)) s += 7;
+                    if (ta.includes(tk)) s += 4;
+                });
+                s += Math.min(30, (track.plays || 0) / 4000);
+                return s;
+            };
+            mapped.sort((a, b) => score(b) - score(a));
+            return mapped;
         } catch (e) {
             console.error('Catalog fetch failed:', e);
             catalogTraffic._enterFallback(Date.now());
@@ -3200,7 +3361,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let audiusSearchTimeout = null;
 
     function renderSearch() {
-        searchContainer.style.display = 'flex';
+        document.body.classList.remove('lang-view-active');
+        setHeaderSearchVisible(true);
         greetingEl.style.display = 'none';
         if (exploreHero) exploreHero.style.display = 'none';
         if (categoryChips) categoryChips.style.display = 'none';
@@ -3445,7 +3607,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function renderLanguagePage(lang) {
         state.currentView = 'language';
-        searchContainer.style.display = 'none';
+        document.body.classList.add('lang-view-active');
+        setHeaderSearchVisible(false);
         viewHeader.style.display = 'none';
         if (exploreHero) exploreHero.style.display = 'none';
         if (categoryChips) categoryChips.style.display = 'none';
@@ -3622,16 +3785,28 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Fetch each mood row independently
+        // Use a stable Spotify-inspired all-time pool (instead of random mood queries)
         let allMoodTracks = [];
+        const pool = await getSpotifyAllTimePool();
+        const poolSize = pool.length;
         for (const mood of lang.moods) {
             const safeId = mood.replace(/[^a-zA-Z]/g, '');
             const grid = document.getElementById(`mood-grid-${safeId}`);
             if (!grid) continue;
 
             try {
-                const query = `${lang.name} ${mood}`;
-                const tracks = await fetchCatalogTracks(query, 15);
+                if (!poolSize) {
+                    grid.innerHTML = '<p class="mood-empty">No tracks found for this mood.</p>';
+                    continue;
+                }
+                const moodIdx = lang.moods.indexOf(mood);
+                const tracksPerMood = Math.min(10, poolSize);
+                const tracks = [];
+                for (let i = 0; i < tracksPerMood; i++) {
+                    const idx = (moodIdx * 3 + i) % poolSize;
+                    const t = pool[idx];
+                    if (t) tracks.push(t);
+                }
 
                 if (tracks.length === 0) {
                     grid.innerHTML = '<p class="mood-empty">No tracks found for this mood.</p>';
@@ -3886,6 +4061,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showLikedSongs() {
+        document.body.classList.remove('lang-view-active');
         state.currentView = 'likedSongs';
 
         viewHeader.style.display = 'none';
