@@ -1570,6 +1570,11 @@ document.addEventListener('DOMContentLoaded', () => {
         'playlist-read-private',
         'playlist-read-collaborative'
     ].join(' ');
+    const SPOTIFY_MAX_LIKED_IMPORT = 500;
+    const SPOTIFY_MAX_PLAYLISTS_IMPORT = 30;
+    const SPOTIFY_MAX_PLAYLIST_TRACKS_IMPORT = 200;
+    const SPOTIFY_RESOLVE_BATCH_SIZE = 12;
+    const SPOTIFY_PREFETCH_CONCURRENCY = 4;
     let playbackRecoveryLock = false;
     let playRequestToken = 0;
     let autoSkipAttempts = 0;
@@ -2636,7 +2641,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    async function createUserPlaylist(name) {
+    async function createUserPlaylist(name, options = {}) {
         const user = getSavedUser();
         const uid = getUserId(user);
         if (!uid) {
@@ -2654,9 +2659,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         const pl = { id: plId, name: trimmed, tracks: [] };
         playlists.push(pl);
-        renderSidebar();
-        showToast(`Playlist "${trimmed}" created`, 'fa-list');
-        window.PalmPlaySync?.pushPlaylist?.(pl).catch((e) => console.warn('Cloud playlist push', e));
+        if (!options.silent) {
+            renderSidebar();
+            showToast(`Playlist "${trimmed}" created`, 'fa-list');
+            window.PalmPlaySync?.pushPlaylist?.(pl).catch((e) => console.warn('Cloud playlist push', e));
+        }
         return playlists.length - 1;
     }
 
@@ -2713,19 +2720,20 @@ document.addEventListener('DOMContentLoaded', () => {
         return true;
     }
 
-    async function addTracksToUserPlaylistBatch(plIndex, rawTracks) {
+    async function addTracksToUserPlaylistBatch(plIndex, rawTracks, options = {}) {
         const user = getSavedUser();
         const uid = getUserId(user);
         const pl = playlists[plIndex];
         if (!uid || !isUserPlaylist(pl) || !Array.isArray(rawTracks) || !rawTracks.length) return 0;
 
-        let added = 0;
+        const rows = [];
+        const staged = [];
         for (const rawTrack of rawTracks) {
             const track = normalizeStreamTrack(rawTrack);
             if (!track.url || trackExistsInPlaylist(pl, track)) continue;
 
             const source = getTrackSource(track);
-            const dbId = await db.tracks.add({
+            rows.push({
                 userId: uid,
                 playlistId: pl.id,
                 source,
@@ -2738,21 +2746,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 artUrl: track.art,
                 dateAdded: new Date().toISOString()
             });
-
-            pl.tracks.push({
-                ...track,
-                dbId,
-                source
-            });
-            added += 1;
+            staged.push({ ...track, source });
         }
 
-        if (!added) return 0;
+        if (!staged.length) return 0;
+
+        let ids = [];
+        try {
+            ids = await db.tracks.bulkAdd(rows, { allKeys: true });
+        } catch (bulkErr) {
+            ids = [];
+            for (const row of rows) {
+                const id = await db.tracks.add(row);
+                ids.push(id);
+            }
+        }
+
+        staged.forEach((track, i) => {
+            pl.tracks.push({
+                ...track,
+                dbId: ids[i]
+            });
+        });
+
+        const added = staged.length;
         await db.playlists.update(pl.id, { updatedAt: new Date().toISOString() });
-        renderSidebar();
-        if (state.currentView === 'home') renderHome();
-        window.PalmPlaySync?.pushPlaylist?.(pl).then(() => window.PalmPlaySync?.pushPlaylistTracks?.(pl))
-            .catch((e) => console.warn('Cloud batch track push', e));
+        if (!options.suppressUiRefresh) {
+            renderSidebar();
+            if (state.currentView === 'home') renderHome();
+        }
+        if (!options.suppressCloudSync) {
+            window.PalmPlaySync?.pushPlaylist?.(pl).then(() => window.PalmPlaySync?.pushPlaylistTracks?.(pl))
+                .catch((e) => console.warn('Cloud batch track push', e));
+        }
         return added;
     }
 
@@ -2887,17 +2913,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const url = path.startsWith('http')
             ? path
             : `https://api.spotify.com${path.startsWith('/') ? path : `/${path}`}`;
-        const res = await fetch(url, {
-            headers: { Authorization: `Bearer ${token}` }
-        });
-        if (!res.ok) {
-            if (res.status === 401) localStorage.removeItem(SPOTIFY_TOKEN_KEY);
-            throw new Error(`Spotify API failed ${res.status}`);
+        for (let attempt = 0; attempt < 3; attempt++) {
+            const res = await fetch(url, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.ok) return res.json();
+            if (res.status === 401) {
+                localStorage.removeItem(SPOTIFY_TOKEN_KEY);
+                throw new Error('Spotify auth expired');
+            }
+            const retriable = res.status === 429 || res.status >= 500;
+            if (!retriable || attempt === 2) {
+                throw new Error(`Spotify API failed ${res.status}`);
+            }
+            const backoffMs = 450 * (attempt + 1);
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
         }
-        return res.json();
+        throw new Error('Spotify API failed');
     }
 
-    async function spotifyPaginate(path, itemsKey = 'items', pageLimit = 200) {
+    async function spotifyPaginate(path, itemsKey = 'items', pageLimit = 200, maxItems = Infinity) {
         let next = path;
         const all = [];
         let guard = 0;
@@ -2906,9 +2941,26 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await spotifyApiGet(next);
             const items = Array.isArray(data?.[itemsKey]) ? data[itemsKey] : [];
             all.push(...items);
+            if (all.length >= maxItems) {
+                all.length = Math.min(all.length, maxItems);
+                break;
+            }
             next = data?.next || null;
         }
         return all;
+    }
+
+    async function mapConcurrent(items, concurrency, mapper) {
+        const out = new Array(items.length);
+        let cursor = 0;
+        const workers = Array.from({ length: Math.max(1, Math.min(concurrency, items.length || 1)) }, async () => {
+            while (cursor < items.length) {
+                const i = cursor++;
+                out[i] = await mapper(items[i], i);
+            }
+        });
+        await Promise.all(workers);
+        return out;
     }
 
     function spotifyTrackToEntry(track) {
@@ -2937,20 +2989,29 @@ document.addEventListener('DOMContentLoaded', () => {
         return artist ? `${name} — ${artist}` : name;
     }
 
-    async function resolveEntriesToTracks(entries, maxEntries = 350) {
+    async function resolveEntriesToTracks(entries, maxEntries = 350, lookupCache = new Map()) {
         const capped = dedupeImportEntries(entries).slice(0, maxEntries);
         const out = [];
         let misses = 0;
         const missingEntries = [];
-        const batch = 5;
+        const batch = SPOTIFY_RESOLVE_BATCH_SIZE;
         for (let i = 0; i < capped.length; i += batch) {
             const chunk = capped.slice(i, i + batch);
             const resolved = await Promise.all(chunk.map(async (entry) => {
+                const cacheKey = `${normalizeTitleKey(entry?.name)}::${primaryArtistKey(entry?.artist)}`;
+                if (lookupCache.has(cacheKey)) {
+                    const cached = lookupCache.get(cacheKey);
+                    return { entry, track: cached.track, reason: cached.reason || '' };
+                }
                 try {
                     const track = await resolveImportedTrack(entry);
-                    return { entry, track, reason: track ? '' : 'No match in catalog' };
+                    const payload = { track, reason: track ? '' : 'No match in catalog' };
+                    lookupCache.set(cacheKey, payload);
+                    return { entry, track: payload.track, reason: payload.reason };
                 } catch {
-                    return { entry, track: null, reason: 'Lookup failed' };
+                    const payload = { track: null, reason: 'Lookup failed' };
+                    lookupCache.set(cacheKey, payload);
+                    return { entry, track: payload.track, reason: payload.reason };
                 }
             }));
             resolved.forEach(({ entry, track, reason }) => {
@@ -2968,8 +3029,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return { tracks: out, misses, missingEntries };
     }
 
-    async function importEntriesAsPlaylist(entries, playlistName) {
-        const plIndex = await createUserPlaylist(playlistName);
+    async function importEntriesAsPlaylist(entries, playlistName, lookupCache = new Map()) {
+        const plIndex = await createUserPlaylist(playlistName, { silent: true });
         if (plIndex < 0) {
             return {
                 added: 0,
@@ -2980,8 +3041,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }))
             };
         }
-        const { tracks, misses, missingEntries } = await resolveEntriesToTracks(entries);
-        const added = await addTracksToUserPlaylistBatch(plIndex, tracks);
+        const { tracks, misses, missingEntries } = await resolveEntriesToTracks(entries, 350, lookupCache);
+        const added = await addTracksToUserPlaylistBatch(plIndex, tracks, {
+            suppressUiRefresh: true,
+            suppressCloudSync: true
+        });
         return { plIndex, added, misses, missingEntries };
     }
 
@@ -3113,80 +3177,118 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         showTransferProgressModal();
         updateTransferProgress('Connecting Spotify...', 'Authorizing and preparing your library import.', 6);
-
-        updateTransferProgress('Importing liked songs...', 'Fetching your Spotify liked songs.', 15);
-        const savedItems = await spotifyPaginate('/v1/me/tracks?limit=50');
-        const likedEntries = savedItems
-            .map(item => spotifyTrackToEntry(item?.track))
-            .filter(Boolean);
-
-        updateTransferProgress('Importing playlists...', 'Reading your Spotify playlists.', 28);
-        const playlistsMeta = await spotifyPaginate('/v1/me/playlists?limit=50');
         let totalAdded = 0;
         let totalMisses = 0;
         let lastPlaylistIndex = -1;
         let importedPlaylistCount = 0;
         const transferLogs = [];
-
-        if (likedEntries.length) {
-            updateTransferProgress('Matching tracks...', 'Matching liked songs in PalmPlay catalog.', 36);
-            const likedResult = await importEntriesAsPlaylist(likedEntries, `Spotify Liked Songs ${new Date().toLocaleDateString()}`);
-            totalAdded += likedResult.added || 0;
-            totalMisses += likedResult.misses || 0;
-            lastPlaylistIndex = likedResult.plIndex ?? lastPlaylistIndex;
-            if ((likedResult.added || 0) > 0) importedPlaylistCount += 1;
-            (likedResult.missingEntries || []).forEach((miss) => {
-                transferLogs.push({
-                    playlist: 'Spotify Liked Songs',
-                    track: miss.label,
-                    reason: miss.reason
-                });
-            });
-        }
-
-        const totalPlaylists = Math.max(1, playlistsMeta.length);
-        for (const pl of playlistsMeta) {
-            if (!pl?.id || !pl?.name) continue;
-            const idx = playlistsMeta.indexOf(pl);
-            const pct = 40 + Math.round((idx / totalPlaylists) * 50);
-            updateTransferProgress(`Importing "${pl.name}"`, 'Matching tracks and creating playlist.', pct);
-            const items = await spotifyPaginate(`/v1/playlists/${encodeURIComponent(pl.id)}/tracks?limit=100`);
-            const entries = items
+        const resolveCache = new Map();
+        const importedPlIndices = [];
+        try {
+            updateTransferProgress('Importing liked songs...', 'Fetching your Spotify liked songs.', 15);
+            const savedItems = await spotifyPaginate('/v1/me/tracks?limit=50', 'items', 60, SPOTIFY_MAX_LIKED_IMPORT);
+            const likedEntries = savedItems
                 .map(item => spotifyTrackToEntry(item?.track))
                 .filter(Boolean);
-            if (!entries.length) continue;
-            const result = await importEntriesAsPlaylist(entries, `${pl.name} (Spotify)`);
-            totalAdded += result.added || 0;
-            totalMisses += result.misses || 0;
-            if (typeof result.plIndex === 'number') lastPlaylistIndex = result.plIndex;
-            if ((result.added || 0) > 0) importedPlaylistCount += 1;
-            (result.missingEntries || []).forEach((miss) => {
-                transferLogs.push({
-                    playlist: pl.name,
-                    track: miss.label,
-                    reason: miss.reason
-                });
-            });
-        }
 
-        if (totalAdded > 0) {
-            showToast(`Spotify imported: ${totalAdded} tracks${totalMisses ? ` (${totalMisses} unavailable)` : ''}`, 'fa-check-circle');
-            finishTransferProgress({
-                added: totalAdded,
-                misses: totalMisses,
-                playlists: importedPlaylistCount,
-                plIndex: lastPlaylistIndex,
-                logs: transferLogs
-            });
-        } else {
-            showToast('No Spotify tracks matched our catalog', 'fa-exclamation-triangle');
-            finishTransferProgress({
-                added: 0,
-                misses: totalMisses,
-                playlists: 0,
-                plIndex: -1,
-                logs: transferLogs
-            });
+            updateTransferProgress('Importing playlists...', 'Reading your Spotify playlists.', 28);
+            const playlistsMeta = await spotifyPaginate('/v1/me/playlists?limit=50', 'items', 40, SPOTIFY_MAX_PLAYLISTS_IMPORT);
+
+            if (likedEntries.length) {
+                updateTransferProgress('Matching tracks...', 'Matching liked songs in PalmPlay catalog.', 36);
+                const likedResult = await importEntriesAsPlaylist(
+                    likedEntries,
+                    `Spotify Liked Songs ${new Date().toLocaleDateString()}`,
+                    resolveCache
+                );
+                totalAdded += likedResult.added || 0;
+                totalMisses += likedResult.misses || 0;
+                lastPlaylistIndex = likedResult.plIndex ?? lastPlaylistIndex;
+                if ((likedResult.added || 0) > 0) importedPlaylistCount += 1;
+                if (typeof likedResult.plIndex === 'number') importedPlIndices.push(likedResult.plIndex);
+                (likedResult.missingEntries || []).forEach((miss) => {
+                    transferLogs.push({
+                        playlist: 'Spotify Liked Songs',
+                        track: miss.label,
+                        reason: miss.reason
+                    });
+                });
+            }
+
+            updateTransferProgress('Preparing playlists...', 'Fetching playlist tracks in parallel.', 40);
+            const prefetchedPlaylists = await mapConcurrent(
+                playlistsMeta,
+                SPOTIFY_PREFETCH_CONCURRENCY,
+                async (pl) => {
+                    if (!pl?.id || !pl?.name) return { pl, entries: [] };
+                    const items = await spotifyPaginate(
+                        `/v1/playlists/${encodeURIComponent(pl.id)}/tracks?limit=100`,
+                        'items',
+                        30,
+                        SPOTIFY_MAX_PLAYLIST_TRACKS_IMPORT
+                    );
+                    const entries = items
+                        .map(item => spotifyTrackToEntry(item?.track))
+                        .filter(Boolean);
+                    return { pl, entries };
+                }
+            );
+
+            const totalPlaylists = Math.max(1, prefetchedPlaylists.length);
+            for (let idx = 0; idx < prefetchedPlaylists.length; idx++) {
+                const { pl, entries } = prefetchedPlaylists[idx];
+                if (!pl?.name || !entries.length) continue;
+                const pct = 48 + Math.round((idx / totalPlaylists) * 42);
+                updateTransferProgress(`Importing "${pl.name}"`, 'Matching tracks and creating playlist.', pct);
+                const result = await importEntriesAsPlaylist(entries, `${pl.name} (Spotify)`, resolveCache);
+                totalAdded += result.added || 0;
+                totalMisses += result.misses || 0;
+                if (typeof result.plIndex === 'number') lastPlaylistIndex = result.plIndex;
+                if ((result.added || 0) > 0) importedPlaylistCount += 1;
+                if (typeof result.plIndex === 'number') importedPlIndices.push(result.plIndex);
+                (result.missingEntries || []).forEach((miss) => {
+                    transferLogs.push({
+                        playlist: pl.name,
+                        track: miss.label,
+                        reason: miss.reason
+                    });
+                });
+            }
+
+            if (totalAdded > 0) {
+                renderSidebar();
+                if (state.currentView === 'home') renderHome();
+                setTimeout(() => {
+                    importedPlIndices.forEach((idx) => {
+                        const pl = playlists[idx];
+                        if (!pl || !isUserPlaylist(pl)) return;
+                        window.PalmPlaySync?.pushPlaylist?.(pl).then(() => window.PalmPlaySync?.pushPlaylistTracks?.(pl))
+                            .catch((e) => console.warn('Cloud transfer sync', e));
+                    });
+                }, 0);
+                showToast(`Spotify imported: ${totalAdded} tracks${totalMisses ? ` (${totalMisses} unavailable)` : ''}`, 'fa-check-circle');
+                finishTransferProgress({
+                    added: totalAdded,
+                    misses: totalMisses,
+                    playlists: importedPlaylistCount,
+                    plIndex: lastPlaylistIndex,
+                    logs: transferLogs
+                });
+            } else {
+                showToast('No Spotify tracks matched our catalog', 'fa-exclamation-triangle');
+                finishTransferProgress({
+                    added: 0,
+                    misses: totalMisses,
+                    playlists: 0,
+                    plIndex: -1,
+                    logs: transferLogs
+                });
+            }
+        } catch (err) {
+            console.warn('Spotify import interrupted', err);
+            const msg = 'Sync paused. Please tap Transfer My Music again to continue.';
+            showToast(msg, 'fa-sync');
+            updateTransferProgress('Sync paused', 'Tap Transfer My Music again. Existing imported songs are kept.', 100);
         }
     }
 
@@ -3203,8 +3305,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function resolveImportedTrack(entry) {
         const query = `${entry.name} ${entry.artist || ''}`.trim();
-        let tracks = await fetchCatalogTracks(query, 8);
-        if (!tracks.length) tracks = await fetchCatalogTracks(entry.name, 8);
+        let tracks = await fetchCatalogTracks(query, 6);
         if (!tracks.length) tracks = await fetchAudiusCatalogFallback(query, 8);
         if (!tracks.length) return null;
 
