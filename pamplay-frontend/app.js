@@ -3199,11 +3199,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isUserLoggedIn()) {
             showToast('Log in to import Spotify library', 'fa-user-lock');
             ppRoutes().go('login');
-            return;
+            return { started: false, reason: 'login_required' };
         }
         if (!isSpotifyConfigured()) {
             showToast('Set SPOTIFY_CLIENT_ID first', 'fa-exclamation-triangle');
-            return;
+            return { started: false, reason: 'spotify_not_configured' };
         }
         showTransferProgressModal();
         updateTransferProgress('Connecting Spotify...', 'Authorizing and preparing your library import.', 6);
@@ -3252,7 +3252,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (needsSpotifyReconnect && !likedEntries.length && !playlistsMeta.length) {
             const redirected = await trySpotifyReconnectOnForbidden();
-            if (redirected) return;
+            if (redirected) {
+                return { started: true, oauthRedirected: true, blocked403: true, added: 0, misses: 0, playlists: 0 };
+            }
         }
 
         if (likedEntries.length) {
@@ -3368,6 +3370,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 plIndex: lastPlaylistIndex,
                 logs: transferLogs
             });
+            return {
+                started: true,
+                blocked403: false,
+                added: totalAdded,
+                misses: totalMisses,
+                playlists: importedPlaylistCount
+            };
         } else {
             showToast('Transfer finished. No new matched songs this run.', 'fa-info-circle');
             finishTransferProgress({
@@ -3377,6 +3386,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 plIndex: -1,
                 logs: transferLogs
             });
+            return {
+                started: true,
+                blocked403: needsSpotifyReconnect && !likedEntries.length && !playlistsMeta.length,
+                added: 0,
+                misses: totalMisses,
+                playlists: importedPlaylistCount
+            };
         }
     }
 
@@ -3451,8 +3467,8 @@ document.addEventListener('DOMContentLoaded', () => {
         titleEl.textContent = 'Import from Spotify & Apps';
         messageEl.innerHTML = `
             <div class="import-apps-panel">
-                <p>One tap transfer from Spotify with automatic playlist import.</p>
-                <button type="button" class="import-spotify-btn" id="import-spotify-btn"><i class="fab fa-spotify"></i> Transfer My Music</button>
+                <p>Smart transfer tries Spotify first, then falls back to TuneMyMusic if needed.</p>
+                <button type="button" class="import-spotify-btn" id="import-spotify-btn"><i class="fab fa-spotify"></i> Smart Transfer My Music</button>
                 <button type="button" class="import-manual-toggle" id="import-manual-toggle">Having trouble? Use manual import</button>
                 <div class="import-manual-wrap" id="import-manual-wrap" hidden>
                     <p class="import-divider"><span>manual fallback</span></p>
@@ -3474,33 +3490,64 @@ document.addEventListener('DOMContentLoaded', () => {
         cancelBtn.textContent = 'Cancel';
         container.style.display = 'flex';
 
+        const manualToggle = document.getElementById('import-manual-toggle');
+        const manualWrap = document.getElementById('import-manual-wrap');
+        const openTuneMyMusic = () => window.open('https://www.tunemymusic.com/', '_blank', 'noopener,noreferrer');
+        const revealManualFallback = (reason, openTmm = false) => {
+            if (manualWrap?.hasAttribute('hidden')) {
+                manualWrap.removeAttribute('hidden');
+                if (manualToggle) manualToggle.textContent = 'Hide manual import';
+            }
+            if (reason) showToast(reason, 'fa-info-circle');
+            if (openTmm) {
+                const popup = openTuneMyMusic();
+                if (!popup) showToast('Popup blocked. Tap Open TuneMyMusic button below.', 'fa-external-link-alt');
+            }
+        };
+
         const openTmm = document.getElementById('open-tmm-btn');
         openTmm?.addEventListener('click', (e) => {
             e.preventDefault();
-            window.open('https://www.tunemymusic.com/', '_blank', 'noopener,noreferrer');
+            openTuneMyMusic();
         });
         const spotifyBtn = document.getElementById('import-spotify-btn');
         spotifyBtn?.addEventListener('click', async (e) => {
             e.preventDefault();
+            const previousLabel = spotifyBtn.innerHTML;
+            spotifyBtn.disabled = true;
+            spotifyBtn.innerHTML = '<i class="fab fa-spotify"></i> Trying Spotify...';
+            const resetButton = () => {
+                spotifyBtn.disabled = false;
+                spotifyBtn.innerHTML = previousLabel;
+            };
             if (!isSpotifyConfigured()) {
-                showToast('Spotify transfer unavailable: missing SPOTIFY_CLIENT_ID', 'fa-exclamation-triangle');
+                resetButton();
+                revealManualFallback('Spotify is not configured. Using TuneMyMusic fallback.', true);
                 return;
             }
-            container.style.display = 'none';
             try {
                 const token = await getValidSpotifyAccessToken();
                 if (token) {
-                    await importSpotifyLibraryToPalmPlay();
+                    const result = await importSpotifyLibraryToPalmPlay();
+                    if (result?.oauthRedirected) return;
+                    if (result?.blocked403 && (result?.added || 0) === 0) {
+                        resetButton();
+                        revealManualFallback('Spotify access blocked. Continue with TuneMyMusic fallback.', true);
+                        return;
+                    }
+                    container.style.display = 'none';
                 } else {
                     await startSpotifyConnect(true, true);
+                    return;
                 }
             } catch (err) {
                 console.warn('Spotify import start failed', err);
-                showToast('Could not start Spotify import', 'fa-exclamation-triangle');
+                resetButton();
+                revealManualFallback('Could not start Spotify transfer. Continue with TuneMyMusic fallback.', true);
+                return;
             }
+            resetButton();
         });
-        const manualToggle = document.getElementById('import-manual-toggle');
-        const manualWrap = document.getElementById('import-manual-wrap');
         manualToggle?.addEventListener('click', (e) => {
             e.preventDefault();
             if (!manualWrap) return;
