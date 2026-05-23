@@ -801,7 +801,17 @@ document.addEventListener('DOMContentLoaded', () => {
             spotifyHandled = await handleSpotifyOAuthCallback();
             if (spotifyHandled && sessionStorage.getItem(SPOTIFY_AUTO_IMPORT_KEY) === '1') {
                 sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
-                await importSpotifyLibraryToPalmPlay();
+                let token = null;
+                try {
+                    token = await getValidSpotifyAccessToken();
+                } catch (e) {
+                    console.warn('Spotify token unavailable after callback', e);
+                }
+                if (token) {
+                    await importSpotifyLibraryToPalmPlay();
+                } else {
+                    showToast('Spotify connection incomplete. Please reconnect.', 'fa-exclamation-triangle');
+                }
             }
         } catch (e) {
             console.warn('Spotify callback handling failed', e);
@@ -3204,6 +3214,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isSpotifyConfigured()) {
             showToast('Set SPOTIFY_CLIENT_ID first', 'fa-exclamation-triangle');
             return { started: false, reason: 'spotify_not_configured' };
+        }
+        let token = null;
+        try {
+            token = await getValidSpotifyAccessToken();
+        } catch (err) {
+            console.warn('Spotify token check failed before import', err);
+        }
+        if (!token) {
+            await startSpotifyConnect(true, true);
+            return { started: true, oauthRedirected: true, reason: 'spotify_not_connected' };
         }
         showTransferProgressModal();
         updateTransferProgress('Connecting Spotify...', 'Authorizing and preparing your library import.', 6);
