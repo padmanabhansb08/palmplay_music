@@ -1565,6 +1565,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const SPOTIFY_PKCE_STATE_KEY = 'palmplay_spotify_pkce_state';
     const SPOTIFY_PKCE_VERIFIER_KEY = 'palmplay_spotify_pkce_verifier';
     const SPOTIFY_AUTO_IMPORT_KEY = 'palmplay_spotify_auto_import';
+    const SPOTIFY_FORBIDDEN_RETRY_KEY = 'palmplay_spotify_forbidden_retry';
     const SPOTIFY_SCOPES = [
         'user-library-read',
         'playlist-read-private',
@@ -2836,7 +2837,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return data.access_token;
     }
 
-    async function startSpotifyConnect(autoImport = true) {
+    async function startSpotifyConnect(autoImport = true, forcePrompt = false) {
         if (!isSpotifyConfigured()) {
             showToast('Spotify connect is not configured yet', 'fa-exclamation-triangle');
             return;
@@ -2855,7 +2856,7 @@ document.addEventListener('DOMContentLoaded', () => {
             code_challenge: challenge,
             scope: SPOTIFY_SCOPES,
             state: stateToken,
-            show_dialog: 'false'
+            show_dialog: forcePrompt ? 'true' : 'false'
         });
         window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
     }
@@ -2869,6 +2870,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (error) {
             showToast(`Spotify auth failed: ${error}`, 'fa-exclamation-triangle');
+            sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
             history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
             return true;
         }
@@ -2877,6 +2879,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const verifier = sessionStorage.getItem(SPOTIFY_PKCE_VERIFIER_KEY);
         if (!expectedState || !verifier || returnedState !== expectedState) {
             showToast('Spotify login session expired. Try again.', 'fa-exclamation-triangle');
+            sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
             history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
             return true;
         }
@@ -2902,8 +2905,24 @@ document.addEventListener('DOMContentLoaded', () => {
         saveSpotifyTokens(payload);
         sessionStorage.removeItem(SPOTIFY_PKCE_STATE_KEY);
         sessionStorage.removeItem(SPOTIFY_PKCE_VERIFIER_KEY);
+        sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
         showToast('Spotify connected', 'fa-check-circle');
         history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+        return true;
+    }
+
+    function isSpotifyForbiddenError(err) {
+        const msg = (err?.message || '').toLowerCase();
+        return /\b403\b/.test(msg) || msg.includes('forbidden');
+    }
+
+    async function trySpotifyReconnectOnForbidden() {
+        localStorage.removeItem(SPOTIFY_TOKEN_KEY);
+        const hasRetried = sessionStorage.getItem(SPOTIFY_FORBIDDEN_RETRY_KEY) === '1';
+        if (hasRetried) return false;
+        sessionStorage.setItem(SPOTIFY_FORBIDDEN_RETRY_KEY, '1');
+        showToast('Refreshing Spotify connection...', 'fa-sync');
+        await startSpotifyConnect(true, true);
         return true;
     }
 
@@ -3199,6 +3218,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const msg = (err?.message || '').trim();
             return msg ? `${baseReason} (${msg})` : baseReason;
         };
+        let needsSpotifyReconnect = false;
         updateTransferProgress('Importing liked songs...', 'Fetching your Spotify liked songs.', 15);
         let likedEntries = [];
         try {
@@ -3208,6 +3228,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 .filter(Boolean);
         } catch (err) {
             console.warn('Spotify liked fetch failed', err);
+            if (isSpotifyForbiddenError(err)) needsSpotifyReconnect = true;
             transferLogs.push({
                 playlist: 'Spotify Liked Songs',
                 track: '(batch)',
@@ -3221,11 +3242,17 @@ document.addEventListener('DOMContentLoaded', () => {
             playlistsMeta = await spotifyPaginate('/v1/me/playlists?limit=50', 'items', 40, SPOTIFY_MAX_PLAYLISTS_IMPORT);
         } catch (err) {
             console.warn('Spotify playlist list fetch failed', err);
+            if (isSpotifyForbiddenError(err)) needsSpotifyReconnect = true;
             transferLogs.push({
                 playlist: 'Spotify Playlists',
                 track: '(batch)',
                 reason: withErrorDetail('Could not fetch playlist list this run', err)
             });
+        }
+
+        if (needsSpotifyReconnect && !likedEntries.length && !playlistsMeta.length) {
+            const redirected = await trySpotifyReconnectOnForbidden();
+            if (redirected) return;
         }
 
         if (likedEntries.length) {
@@ -3465,7 +3492,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (token) {
                     await importSpotifyLibraryToPalmPlay();
                 } else {
-                    await startSpotifyConnect(true);
+                    await startSpotifyConnect(true, true);
                 }
             } catch (err) {
                 console.warn('Spotify import start failed', err);
