@@ -3184,18 +3184,38 @@ document.addEventListener('DOMContentLoaded', () => {
         const transferLogs = [];
         const resolveCache = new Map();
         const importedPlIndices = [];
+        updateTransferProgress('Importing liked songs...', 'Fetching your Spotify liked songs.', 15);
+        let likedEntries = [];
         try {
-            updateTransferProgress('Importing liked songs...', 'Fetching your Spotify liked songs.', 15);
             const savedItems = await spotifyPaginate('/v1/me/tracks?limit=50', 'items', 60, SPOTIFY_MAX_LIKED_IMPORT);
-            const likedEntries = savedItems
+            likedEntries = savedItems
                 .map(item => spotifyTrackToEntry(item?.track))
                 .filter(Boolean);
+        } catch (err) {
+            console.warn('Spotify liked fetch failed', err);
+            transferLogs.push({
+                playlist: 'Spotify Liked Songs',
+                track: '(batch)',
+                reason: 'Could not fetch liked songs this run'
+            });
+        }
 
-            updateTransferProgress('Importing playlists...', 'Reading your Spotify playlists.', 28);
-            const playlistsMeta = await spotifyPaginate('/v1/me/playlists?limit=50', 'items', 40, SPOTIFY_MAX_PLAYLISTS_IMPORT);
+        updateTransferProgress('Importing playlists...', 'Reading your Spotify playlists.', 28);
+        let playlistsMeta = [];
+        try {
+            playlistsMeta = await spotifyPaginate('/v1/me/playlists?limit=50', 'items', 40, SPOTIFY_MAX_PLAYLISTS_IMPORT);
+        } catch (err) {
+            console.warn('Spotify playlist list fetch failed', err);
+            transferLogs.push({
+                playlist: 'Spotify Playlists',
+                track: '(batch)',
+                reason: 'Could not fetch playlist list this run'
+            });
+        }
 
-            if (likedEntries.length) {
-                updateTransferProgress('Matching tracks...', 'Matching liked songs in PalmPlay catalog.', 36);
+        if (likedEntries.length) {
+            updateTransferProgress('Matching tracks...', 'Matching liked songs in PalmPlay catalog.', 36);
+            try {
                 const likedResult = await importEntriesAsPlaylist(
                     likedEntries,
                     `Spotify Liked Songs ${new Date().toLocaleDateString()}`,
@@ -3213,14 +3233,23 @@ document.addEventListener('DOMContentLoaded', () => {
                         reason: miss.reason
                     });
                 });
+            } catch (err) {
+                console.warn('Liked import failed', err);
+                transferLogs.push({
+                    playlist: 'Spotify Liked Songs',
+                    track: '(batch)',
+                    reason: 'Could not import liked songs this run'
+                });
             }
+        }
 
-            updateTransferProgress('Preparing playlists...', 'Fetching playlist tracks in parallel.', 40);
-            const prefetchedPlaylists = await mapConcurrent(
-                playlistsMeta,
-                SPOTIFY_PREFETCH_CONCURRENCY,
-                async (pl) => {
-                    if (!pl?.id || !pl?.name) return { pl, entries: [] };
+        updateTransferProgress('Preparing playlists...', 'Fetching playlist tracks in parallel.', 40);
+        const prefetchedPlaylists = await mapConcurrent(
+            playlistsMeta,
+            SPOTIFY_PREFETCH_CONCURRENCY,
+            async (pl) => {
+                if (!pl?.id || !pl?.name) return { pl, entries: [], failed: false };
+                try {
                     const items = await spotifyPaginate(
                         `/v1/playlists/${encodeURIComponent(pl.id)}/tracks?limit=100`,
                         'items',
@@ -3230,16 +3259,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     const entries = items
                         .map(item => spotifyTrackToEntry(item?.track))
                         .filter(Boolean);
-                    return { pl, entries };
+                    return { pl, entries, failed: false };
+                } catch (err) {
+                    console.warn('Playlist prefetch failed', pl.name, err);
+                    return { pl, entries: [], failed: true };
                 }
-            );
+            }
+        );
 
-            const totalPlaylists = Math.max(1, prefetchedPlaylists.length);
-            for (let idx = 0; idx < prefetchedPlaylists.length; idx++) {
-                const { pl, entries } = prefetchedPlaylists[idx];
-                if (!pl?.name || !entries.length) continue;
-                const pct = 48 + Math.round((idx / totalPlaylists) * 42);
-                updateTransferProgress(`Importing "${pl.name}"`, 'Matching tracks and creating playlist.', pct);
+        const totalPlaylists = Math.max(1, prefetchedPlaylists.length);
+        for (let idx = 0; idx < prefetchedPlaylists.length; idx++) {
+            const { pl, entries, failed } = prefetchedPlaylists[idx];
+            if (!pl?.name) continue;
+            const pct = 48 + Math.round((idx / totalPlaylists) * 42);
+            updateTransferProgress(`Importing "${pl.name}"`, 'Matching tracks and creating playlist.', pct);
+            if (failed) {
+                transferLogs.push({
+                    playlist: pl.name,
+                    track: '(batch)',
+                    reason: 'Could not fetch this playlist this run'
+                });
+                continue;
+            }
+            if (!entries.length) continue;
+            try {
                 const result = await importEntriesAsPlaylist(entries, `${pl.name} (Spotify)`, resolveCache);
                 totalAdded += result.added || 0;
                 totalMisses += result.misses || 0;
@@ -3253,42 +3296,45 @@ document.addEventListener('DOMContentLoaded', () => {
                         reason: miss.reason
                     });
                 });
+            } catch (err) {
+                console.warn('Playlist import failed', pl.name, err);
+                transferLogs.push({
+                    playlist: pl.name,
+                    track: '(batch)',
+                    reason: 'Could not import this playlist this run'
+                });
             }
+        }
 
-            if (totalAdded > 0) {
-                renderSidebar();
-                if (state.currentView === 'home') renderHome();
-                setTimeout(() => {
-                    importedPlIndices.forEach((idx) => {
-                        const pl = playlists[idx];
-                        if (!pl || !isUserPlaylist(pl)) return;
-                        window.PalmPlaySync?.pushPlaylist?.(pl).then(() => window.PalmPlaySync?.pushPlaylistTracks?.(pl))
-                            .catch((e) => console.warn('Cloud transfer sync', e));
-                    });
-                }, 0);
-                showToast(`Spotify imported: ${totalAdded} tracks${totalMisses ? ` (${totalMisses} unavailable)` : ''}`, 'fa-check-circle');
-                finishTransferProgress({
-                    added: totalAdded,
-                    misses: totalMisses,
-                    playlists: importedPlaylistCount,
-                    plIndex: lastPlaylistIndex,
-                    logs: transferLogs
-                });
-            } else {
-                showToast('No Spotify tracks matched our catalog', 'fa-exclamation-triangle');
-                finishTransferProgress({
-                    added: 0,
-                    misses: totalMisses,
-                    playlists: 0,
-                    plIndex: -1,
-                    logs: transferLogs
-                });
-            }
-        } catch (err) {
-            console.warn('Spotify import interrupted', err);
-            const msg = 'Sync paused. Please tap Transfer My Music again to continue.';
-            showToast(msg, 'fa-sync');
-            updateTransferProgress('Sync paused', 'Tap Transfer My Music again. Existing imported songs are kept.', 100);
+        renderSidebar();
+        if (state.currentView === 'home') renderHome();
+        setTimeout(() => {
+            importedPlIndices.forEach((idx) => {
+                const pl = playlists[idx];
+                if (!pl || !isUserPlaylist(pl)) return;
+                window.PalmPlaySync?.pushPlaylist?.(pl).then(() => window.PalmPlaySync?.pushPlaylistTracks?.(pl))
+                    .catch((e) => console.warn('Cloud transfer sync', e));
+            });
+        }, 0);
+
+        if (totalAdded > 0) {
+            showToast(`Spotify imported: ${totalAdded} tracks${totalMisses ? ` (${totalMisses} unavailable)` : ''}`, 'fa-check-circle');
+            finishTransferProgress({
+                added: totalAdded,
+                misses: totalMisses,
+                playlists: importedPlaylistCount,
+                plIndex: lastPlaylistIndex,
+                logs: transferLogs
+            });
+        } else {
+            showToast('Transfer finished. No new matched songs this run.', 'fa-info-circle');
+            finishTransferProgress({
+                added: 0,
+                misses: totalMisses,
+                playlists: importedPlaylistCount,
+                plIndex: -1,
+                logs: transferLogs
+            });
         }
     }
 
