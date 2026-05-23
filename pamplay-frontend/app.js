@@ -2924,7 +2924,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             const retriable = res.status === 429 || res.status >= 500;
             if (!retriable || attempt === 2) {
-                throw new Error(`Spotify API failed ${res.status}`);
+                let detail = '';
+                try {
+                    const body = await res.json();
+                    const message = body?.error?.message || body?.error_description || '';
+                    const statusFromBody = body?.error?.status;
+                    if (statusFromBody || message) {
+                        detail = `${statusFromBody || res.status}${message ? `: ${message}` : ''}`;
+                    }
+                } catch {
+                    detail = '';
+                }
+                throw new Error(`Spotify API failed ${detail || `${res.status} ${res.statusText}`.trim()}`);
             }
             const backoffMs = 450 * (attempt + 1);
             await new Promise((resolve) => setTimeout(resolve, backoffMs));
@@ -3184,6 +3195,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const transferLogs = [];
         const resolveCache = new Map();
         const importedPlIndices = [];
+        const withErrorDetail = (baseReason, err) => {
+            const msg = (err?.message || '').trim();
+            return msg ? `${baseReason} (${msg})` : baseReason;
+        };
         updateTransferProgress('Importing liked songs...', 'Fetching your Spotify liked songs.', 15);
         let likedEntries = [];
         try {
@@ -3196,7 +3211,7 @@ document.addEventListener('DOMContentLoaded', () => {
             transferLogs.push({
                 playlist: 'Spotify Liked Songs',
                 track: '(batch)',
-                reason: 'Could not fetch liked songs this run'
+                reason: withErrorDetail('Could not fetch liked songs this run', err)
             });
         }
 
@@ -3209,7 +3224,7 @@ document.addEventListener('DOMContentLoaded', () => {
             transferLogs.push({
                 playlist: 'Spotify Playlists',
                 track: '(batch)',
-                reason: 'Could not fetch playlist list this run'
+                reason: withErrorDetail('Could not fetch playlist list this run', err)
             });
         }
 
@@ -3238,7 +3253,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 transferLogs.push({
                     playlist: 'Spotify Liked Songs',
                     track: '(batch)',
-                    reason: 'Could not import liked songs this run'
+                    reason: withErrorDetail('Could not import liked songs this run', err)
                 });
             }
         }
@@ -3248,7 +3263,7 @@ document.addEventListener('DOMContentLoaded', () => {
             playlistsMeta,
             SPOTIFY_PREFETCH_CONCURRENCY,
             async (pl) => {
-                if (!pl?.id || !pl?.name) return { pl, entries: [], failed: false };
+                if (!pl?.id || !pl?.name) return { pl, entries: [], failed: false, error: null };
                 try {
                     const items = await spotifyPaginate(
                         `/v1/playlists/${encodeURIComponent(pl.id)}/tracks?limit=100`,
@@ -3259,17 +3274,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     const entries = items
                         .map(item => spotifyTrackToEntry(item?.track))
                         .filter(Boolean);
-                    return { pl, entries, failed: false };
+                    return { pl, entries, failed: false, error: null };
                 } catch (err) {
                     console.warn('Playlist prefetch failed', pl.name, err);
-                    return { pl, entries: [], failed: true };
+                    return { pl, entries: [], failed: true, error: err };
                 }
             }
         );
 
         const totalPlaylists = Math.max(1, prefetchedPlaylists.length);
         for (let idx = 0; idx < prefetchedPlaylists.length; idx++) {
-            const { pl, entries, failed } = prefetchedPlaylists[idx];
+            const { pl, entries, failed, error } = prefetchedPlaylists[idx];
             if (!pl?.name) continue;
             const pct = 48 + Math.round((idx / totalPlaylists) * 42);
             updateTransferProgress(`Importing "${pl.name}"`, 'Matching tracks and creating playlist.', pct);
@@ -3277,7 +3292,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 transferLogs.push({
                     playlist: pl.name,
                     track: '(batch)',
-                    reason: 'Could not fetch this playlist this run'
+                    reason: withErrorDetail('Could not fetch this playlist this run', error)
                 });
                 continue;
             }
@@ -3301,7 +3316,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 transferLogs.push({
                     playlist: pl.name,
                     track: '(batch)',
-                    reason: 'Could not import this playlist this run'
+                    reason: withErrorDetail('Could not import this playlist this run', err)
                 });
             }
         }
