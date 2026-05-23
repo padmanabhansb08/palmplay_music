@@ -3528,18 +3528,19 @@ document.addEventListener('DOMContentLoaded', () => {
         titleEl.textContent = 'Import from Spotify & Apps';
         messageEl.innerHTML = `
             <div class="import-apps-panel">
-                <p>Smart transfer tries Spotify first, then falls back to TuneMyMusic if needed.</p>
-                <button type="button" class="import-spotify-btn" id="import-spotify-btn"><i class="fab fa-spotify"></i> Smart Transfer My Music</button>
-                <button type="button" class="import-manual-toggle" id="import-manual-toggle">Having trouble? Use manual import</button>
-                <div class="import-manual-wrap" id="import-manual-wrap" hidden>
-                    <p class="import-divider"><span>manual fallback</span></p>
-                    <p>Use TuneMyMusic to export tracks from Spotify, Apple Music, YouTube Music, and more.</p>
+                <p>Use TuneMyMusic first for the most reliable transfer, then paste or upload your exported list below.</p>
+                <div class="import-manual-wrap" id="import-manual-wrap">
+                    <p class="import-divider"><span>recommended</span></p>
                     <button type="button" class="import-tmm-btn" id="open-tmm-btn"><i class="fas fa-external-link-alt"></i> Open TuneMyMusic</button>
                     <textarea id="import-tracks-text" class="import-tracks-text" placeholder="Paste exported track list here (CSV or lines like: Song, Artist)."></textarea>
                     <label class="import-file-label">
                         <input type="file" id="import-tracks-file" accept=".txt,.csv,text/plain,text/csv">
                         <i class="fas fa-file-upload"></i> Load TXT/CSV file
                     </label>
+                </div>
+                <p class="import-divider"><span>optional</span></p>
+                <button type="button" class="import-spotify-btn" id="import-spotify-btn"><i class="fab fa-spotify"></i> Try Spotify Connect (Beta)</button>
+                <p>Use Spotify Connect only if you want direct sync and it is working on your account.</p>
                 </div>
             </div>
         `;
@@ -3551,14 +3552,10 @@ document.addEventListener('DOMContentLoaded', () => {
         cancelBtn.textContent = 'Cancel';
         container.style.display = 'flex';
 
-        const manualToggle = document.getElementById('import-manual-toggle');
         const manualWrap = document.getElementById('import-manual-wrap');
         const openTuneMyMusic = () => window.open('https://www.tunemymusic.com/', '_blank', 'noopener,noreferrer');
         const revealManualFallback = (reason, openTmm = false) => {
-            if (manualWrap?.hasAttribute('hidden')) {
-                manualWrap.removeAttribute('hidden');
-                if (manualToggle) manualToggle.textContent = 'Hide manual import';
-            }
+            if (manualWrap?.hasAttribute('hidden')) manualWrap.removeAttribute('hidden');
             if (reason) showToast(reason, 'fa-info-circle');
             if (openTmm) {
                 const popup = openTuneMyMusic();
@@ -3609,19 +3606,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             resetButton();
         });
-        manualToggle?.addEventListener('click', (e) => {
-            e.preventDefault();
-            if (!manualWrap) return;
-            const hidden = manualWrap.hasAttribute('hidden');
-            if (hidden) {
-                manualWrap.removeAttribute('hidden');
-                manualToggle.textContent = 'Hide manual import';
-            } else {
-                manualWrap.setAttribute('hidden', '');
-                manualToggle.textContent = 'Having trouble? Use manual import';
-            }
-        });
-
         const tracksTextEl = document.getElementById('import-tracks-text');
         const fileEl = document.getElementById('import-tracks-file');
         fileEl?.addEventListener('change', async (e) => {
