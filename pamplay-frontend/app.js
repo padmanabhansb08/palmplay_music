@@ -1574,6 +1574,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const SPOTIFY_TOKEN_KEY = 'palmplay_spotify_tokens_v1';
     const SPOTIFY_PKCE_STATE_KEY = 'palmplay_spotify_pkce_state';
     const SPOTIFY_PKCE_VERIFIER_KEY = 'palmplay_spotify_pkce_verifier';
+    const SPOTIFY_PKCE_CACHE_KEY = 'palmplay_spotify_pkce_cache_v1';
     const SPOTIFY_AUTO_IMPORT_KEY = 'palmplay_spotify_auto_import';
     const SPOTIFY_FORBIDDEN_RETRY_KEY = 'palmplay_spotify_forbidden_retry';
     const SPOTIFY_SCOPES = [
@@ -2813,6 +2814,45 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function saveSpotifyPkceSession(stateToken, verifier) {
+        sessionStorage.setItem(SPOTIFY_PKCE_STATE_KEY, stateToken);
+        sessionStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, verifier);
+        try {
+            localStorage.setItem(SPOTIFY_PKCE_CACHE_KEY, JSON.stringify({
+                state: stateToken,
+                verifier,
+                createdAt: Date.now()
+            }));
+        } catch (e) {
+            console.warn('Spotify PKCE cache save failed', e);
+        }
+    }
+
+    function loadSpotifyPkceSession() {
+        let state = sessionStorage.getItem(SPOTIFY_PKCE_STATE_KEY);
+        let verifier = sessionStorage.getItem(SPOTIFY_PKCE_VERIFIER_KEY);
+        if (state && verifier) return { state, verifier };
+        try {
+            const raw = localStorage.getItem(SPOTIFY_PKCE_CACHE_KEY);
+            const parsed = raw ? JSON.parse(raw) : null;
+            const fresh = parsed && (Date.now() - Number(parsed.createdAt || 0)) < (30 * 60 * 1000);
+            if (!fresh || !parsed?.state || !parsed?.verifier) return null;
+            state = parsed.state;
+            verifier = parsed.verifier;
+            sessionStorage.setItem(SPOTIFY_PKCE_STATE_KEY, state);
+            sessionStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, verifier);
+            return { state, verifier };
+        } catch {
+            return null;
+        }
+    }
+
+    function clearSpotifyPkceSession() {
+        sessionStorage.removeItem(SPOTIFY_PKCE_STATE_KEY);
+        sessionStorage.removeItem(SPOTIFY_PKCE_VERIFIER_KEY);
+        localStorage.removeItem(SPOTIFY_PKCE_CACHE_KEY);
+    }
+
     function saveSpotifyTokens(payload) {
         if (!payload?.access_token) return;
         const current = loadSpotifyTokens() || {};
@@ -2855,8 +2895,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const verifier = randomToken(96);
         const stateToken = randomToken(24);
         const challenge = await pkceChallenge(verifier);
-        sessionStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, verifier);
-        sessionStorage.setItem(SPOTIFY_PKCE_STATE_KEY, stateToken);
+        saveSpotifyPkceSession(stateToken, verifier);
         sessionStorage.setItem(SPOTIFY_AUTO_IMPORT_KEY, autoImport ? '1' : '0');
         const params = new URLSearchParams({
             client_id: SPOTIFY_CLIENT_ID,
@@ -2880,15 +2919,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (error) {
             showToast(`Spotify auth failed: ${error}`, 'fa-exclamation-triangle');
+            clearSpotifyPkceSession();
             sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
             history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
             return true;
         }
 
-        const expectedState = sessionStorage.getItem(SPOTIFY_PKCE_STATE_KEY);
-        const verifier = sessionStorage.getItem(SPOTIFY_PKCE_VERIFIER_KEY);
+        const pkce = loadSpotifyPkceSession();
+        const expectedState = pkce?.state || '';
+        const verifier = pkce?.verifier || '';
         if (!expectedState || !verifier || returnedState !== expectedState) {
             showToast('Spotify login session expired. Try again.', 'fa-exclamation-triangle');
+            clearSpotifyPkceSession();
             sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
             history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
             return true;
@@ -2913,8 +2955,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const payload = await res.json();
         saveSpotifyTokens(payload);
-        sessionStorage.removeItem(SPOTIFY_PKCE_STATE_KEY);
-        sessionStorage.removeItem(SPOTIFY_PKCE_VERIFIER_KEY);
+        clearSpotifyPkceSession();
         sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
         showToast('Spotify connected', 'fa-check-circle');
         history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
