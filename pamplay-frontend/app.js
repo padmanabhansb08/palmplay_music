@@ -2342,25 +2342,27 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function playAudioWithTimeout(media, timeoutMs = 7000) {
-        const settleMs = Math.min(Math.max(timeoutMs, 0), 250);
-        let rejected = false;
+    function beginAudioPlayback(media) {
         try {
             const playPromise = media.play();
             if (playPromise && typeof playPromise.catch === 'function') {
-                playPromise.catch((e) => {
-                    rejected = true;
-                    console.warn('Audio play failed:', e);
-                });
+                playPromise.catch((e) => console.warn('Audio play failed:', e));
             }
+            return true;
         } catch (e) {
             console.warn('Audio play failed:', e);
-            return Promise.resolve(false);
+            return false;
         }
+    }
 
-        return new Promise((resolve) => {
-            setTimeout(() => resolve(!rejected && !media.error), settleMs);
-        });
+    function resetAudioForSwitch() {
+        try {
+            audio.pause();
+            audio.removeAttribute('src');
+            audio.load();
+        } catch (e) {
+            console.warn('Audio reset failed:', e);
+        }
     }
 
     function getPlayHistory() {
@@ -4410,6 +4412,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function playTrack(plIndex, tIndex, opts = {}) {
         const autoNext = !!opts.autoNext;
         const fromQueue = !!opts.fromQueue;
+        const manualSwitch = !autoNext;
+        const resolveTimeoutMs = manualSwitch ? 3500 : 7000;
+        const readyTimeoutMs = manualSwitch ? 3500 : 6000;
+        const retryReadyTimeoutMs = manualSwitch ? 2500 : 5000;
         const pl = playlists[plIndex];
         let track = pl?.tracks?.[tIndex];
         if (!track) {
@@ -4431,7 +4437,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let url = track.url;
         if (!url || track._unplayable) {
-            url = await resolveTrackStreamSafe(track, true);
+            url = await resolveTrackStreamSafe(track, true, resolveTimeoutMs);
             if (token !== playRequestToken) return;
         }
         if (!url) {
@@ -4459,7 +4465,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (token !== playRequestToken) return;
 
         // Immediate, reliable switch.
-        audio.pause();
+        resetAudioForSwitch();
         audio.currentTime = 0;
         audio.src = url;
         audio.preload = 'auto';
@@ -4469,31 +4475,29 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSource.gain.gain.setValueAtTime(state.volume, audioCtx.currentTime);
         }
 
-        const started = await playAudioWithTimeout(audio, 7000);
-        if (token !== playRequestToken) return;
-        if (!started && audio.paused) {
-            showToast('Playback blocked. Tap play again.', 'fa-play');
+        if (!beginAudioPlayback(audio)) {
             state.isBuffering = false;
             state.isPlaying = false;
             updatePlayerUI();
+            showToast('Playback blocked. Tap play again.', 'fa-play');
             return;
         }
+        if (token !== playRequestToken) return;
 
-        let ok = await waitForPlaybackReady(6000);
+        let ok = await waitForPlaybackReady(readyTimeoutMs);
         if (token !== playRequestToken) return;
         if (!ok || audio.error || audio.paused) {
-            const retryUrl = await resolveTrackStreamSafe(track, true);
+            const retryUrl = await resolveTrackStreamSafe(track, true, resolveTimeoutMs);
             if (token !== playRequestToken) return;
-            if (retryUrl && retryUrl !== url) {
+            if (retryUrl) {
                 playlists[plIndex].tracks[tIndex].url = retryUrl;
-                audio.pause();
+                resetAudioForSwitch();
                 audio.currentTime = 0;
                 audio.src = retryUrl;
                 audio.preload = 'auto';
                 audio.load();
                 try {
-                    const retryStarted = await playAudioWithTimeout(audio, 7000);
-                    ok = retryStarted ? await waitForPlaybackReady(5000) : false;
+                    ok = beginAudioPlayback(audio) ? await waitForPlaybackReady(retryReadyTimeoutMs) : false;
                     if (token !== playRequestToken) return;
                 } catch (e2) {
                     console.warn('Retry play failed:', e2);
@@ -4540,8 +4544,7 @@ document.addEventListener('DOMContentLoaded', () => {
             audio.pause();
             state.isPlaying = false;
         } else {
-            const resumed = await playAudioWithTimeout(audio, 5000);
-            if (resumed) {
+            if (beginAudioPlayback(audio)) {
                 state.isPlaying = true;
             } else {
                 showToast('Playback blocked. Tap play again.', 'fa-play');
