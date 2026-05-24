@@ -1590,6 +1590,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const SPOTIFY_MAX_PLAYLIST_TRACKS_IMPORT = 200;
     const SPOTIFY_RESOLVE_BATCH_SIZE = 12;
     const SPOTIFY_PREFETCH_CONCURRENCY = 4;
+    const LIKED_SONGS_PLAYLIST_ID = '__liked_songs__';
     let playbackRecoveryLock = false;
     let playRequestToken = 0;
     let autoSkipAttempts = 0;
@@ -2295,6 +2296,25 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function playAudioWithTimeout(media, timeoutMs = 7000) {
+        let timer = null;
+        const started = Promise.resolve()
+            .then(() => media.play())
+            .then(() => true)
+            .catch((e) => {
+                console.warn('Audio play failed:', e);
+                return false;
+            });
+
+        const timedOut = new Promise((resolve) => {
+            timer = setTimeout(() => resolve(false), timeoutMs);
+        });
+
+        return Promise.race([started, timedOut]).finally(() => {
+            if (timer) clearTimeout(timer);
+        });
+    }
+
     function getPlayHistory() {
         try {
             const raw = localStorage.getItem(PLAY_HISTORY_KEY);
@@ -2480,6 +2500,61 @@ document.addEventListener('DOMContentLoaded', () => {
         playlists[idx].tracks = tracks;
         playlists[idx].name = name;
         return idx;
+    }
+
+    function findLikedSourceTrack(liked) {
+        if (!liked) return null;
+        const wantedName = liked.trackName || liked.name;
+        const wantedArtist = liked.artist;
+        const savedPlaylistId = liked.playlistId;
+        const savedTrackIndex = Number(liked.trackIndex);
+
+        if (savedPlaylistId != null && Number.isInteger(savedTrackIndex)) {
+            const savedPl = playlists.find(pl => pl.id === savedPlaylistId && pl.id !== LIKED_SONGS_PLAYLIST_ID);
+            const savedTrack = savedPl?.tracks?.[savedTrackIndex];
+            if (savedTrack && savedTrack.name === wantedName && savedTrack.artist === wantedArtist) {
+                return savedTrack;
+            }
+        }
+
+        for (const pl of playlists) {
+            if (!pl?.tracks?.length || pl.id === LIKED_SONGS_PLAYLIST_ID) continue;
+            const match = pl.tracks.find(track => track.name === wantedName && track.artist === wantedArtist);
+            if (match) return match;
+        }
+        return null;
+    }
+
+    function likedSongToPlayableTrack(liked) {
+        const sourceTrack = findLikedSourceTrack(liked);
+        const externalId = liked.externalId || sourceTrack?.externalId || null;
+        const source = liked.source || sourceTrack?.source || null;
+        const isCatalog = !!(liked.isCatalog || source === 'catalog' || sourceTrack?.isCatalog);
+        const isAudius = !!(liked.isAudius || source === 'audius' || sourceTrack?.isAudius);
+        const id = externalId || ((isCatalog || isAudius) ? (sourceTrack?.id || null) : (sourceTrack?.id || liked.id || null));
+
+        return {
+            ...(sourceTrack || {}),
+            id,
+            externalId,
+            source,
+            name: liked.trackName || sourceTrack?.name || 'Unknown',
+            artist: liked.artist || sourceTrack?.artist || 'Unknown',
+            album: liked.album || sourceTrack?.album || 'Liked Songs',
+            duration: liked.duration || sourceTrack?.duration || 0,
+            dateAdded: liked.dateAdded || sourceTrack?.dateAdded || null,
+            url: sourceTrack?.url || liked.url || liked.streamUrl || null,
+            art: liked.art || liked.artUrl || sourceTrack?.art || DEFAULT_ART_URL,
+            artUrl: liked.artUrl || sourceTrack?.artUrl || sourceTrack?.art || null,
+            isCatalog,
+            isAudius,
+            isCatalogFallback: !!(sourceTrack?.isCatalogFallback || isAudius)
+        };
+    }
+
+    function ensureLikedSongsPlaylist() {
+        const tracks = likedSongs.map(likedSongToPlayableTrack);
+        return upsertTempPlaylist(LIKED_SONGS_PLAYLIST_ID, 'Liked Songs', tracks);
     }
 
     function normalizeSearchText(value) {
@@ -4292,7 +4367,14 @@ document.addEventListener('DOMContentLoaded', () => {
     async function playTrack(plIndex, tIndex, opts = {}) {
         const autoNext = !!opts.autoNext;
         const fromQueue = !!opts.fromQueue;
-        if (playbackRecoveryLock) return;
+        const pl = playlists[plIndex];
+        let track = pl?.tracks?.[tIndex];
+        if (!track) {
+            state.isBuffering = false;
+            state.isPlaying = false;
+            updatePlayerUI();
+            return;
+        }
         const token = ++playRequestToken;
         state.currentPlaylistIndex = plIndex;
         state.currentTrackIndex = tIndex;
@@ -4302,12 +4384,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         state.isBuffering = true;
         updatePlayerUI();
-        let track = playlists[plIndex]?.tracks?.[tIndex];
-        if (!track) {
-            state.isBuffering = false;
-            updatePlayerUI();
-            return;
-        }
 
         let url = track.url;
         if (!url || track._unplayable) {
@@ -4346,12 +4422,15 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSource.gain.gain.setValueAtTime(state.volume, audioCtx.currentTime);
         }
 
-        try {
-            await audio.play();
-        } catch (e) {
-            console.warn('Play blocked:', e);
-        }
+        const started = await playAudioWithTimeout(audio, 7000);
         if (token !== playRequestToken) return;
+        if (!started && audio.paused) {
+            showToast('Playback blocked. Tap play again.', 'fa-play');
+            state.isBuffering = false;
+            state.isPlaying = false;
+            updatePlayerUI();
+            return;
+        }
 
         let ok = await waitForPlaybackReady(6000);
         if (token !== playRequestToken) return;
@@ -4366,8 +4445,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 audio.currentTime = 0;
                 audio.src = retryUrl;
                 try {
-                    await audio.play();
-                    ok = await waitForPlaybackReady(5000);
+                    const retryStarted = await playAudioWithTimeout(audio, 7000);
+                    ok = retryStarted || await waitForPlaybackReady(5000);
                 } catch (e2) {
                     console.warn('Retry play failed:', e2);
                     ok = false;
@@ -4397,6 +4476,12 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.track-row').forEach((row, idx) => {
                 row.classList.toggle('active', idx === tIndex);
             });
+        } else if (state.currentView === 'likedSongs' && playlists[plIndex]?.id === LIKED_SONGS_PLAYLIST_ID) {
+            const likedPlayIcon = document.querySelector('#liked-main-play i');
+            if (likedPlayIcon) likedPlayIcon.className = 'fas fa-pause';
+            document.querySelectorAll('#liked-track-list-body .track-row').forEach((row, idx) => {
+                row.classList.toggle('active', idx === tIndex);
+            });
         }
     }
 
@@ -4407,11 +4492,10 @@ document.addEventListener('DOMContentLoaded', () => {
             audio.pause();
             state.isPlaying = false;
         } else {
-            try {
-                await audio.play();
+            const resumed = await playAudioWithTimeout(audio, 5000);
+            if (resumed) {
                 state.isPlaying = true;
-            } catch (e) {
-                console.warn('Resume play failed:', e);
+            } else {
                 showToast('Playback blocked. Tap play again.', 'fa-play');
                 state.isPlaying = false;
             }
@@ -5403,6 +5487,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 trackIndex: tIndex,
                 isAudius: track.isAudius || false,
                 isCatalog: track.isCatalog || false,
+                source: getTrackSource(track),
+                externalId: track.externalId || ((track.isCatalog || track.isAudius) ? track.id : null),
                 url: track.url || null,
                 artUrl: track.art || null
             };
@@ -5440,6 +5526,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function showLikedSongs() {
         document.body.classList.remove('lang-view-active');
         state.currentView = 'likedSongs';
+        const likedPlIndex = ensureLikedSongsPlaylist();
+        const isLikedPlaylistCurrent = state.currentPlaylistIndex === likedPlIndex;
 
         viewHeader.style.display = 'none';
         greetingEl.style.display = 'none';
@@ -5472,7 +5560,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             
             <div class="pl-controls-bar">
-                <button class="play-circle-btn" id="liked-main-play"><i class="fas ${state.isPlaying ? 'fa-pause' : 'fa-play'}"></i></button>
+                <button class="play-circle-btn" id="liked-main-play"><i class="fas ${isLikedPlaylistCurrent && state.isPlaying ? 'fa-pause' : 'fa-play'}"></i></button>
                 <i class="fas fa-random pl-icon-btn" id="liked-shuffle" title="Shuffle" style="${state.isShuffle ? 'color:var(--primary)' : ''}"></i>
             </div>
 
@@ -5496,17 +5584,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const likedPlayBtn = document.getElementById('liked-main-play');
         if (likedPlayBtn) {
             likedPlayBtn.onclick = () => {
-                if (state.isPlaying && audio.src) {
-                    // Currently playing, toggle pause
+                if (state.currentPlaylistIndex === likedPlIndex && audio.src) {
                     togglePlay();
-                } else if (!state.isPlaying && audio.src) {
-                    // Paused, resume
-                    togglePlay();
-                } else {
-                    // Nothing playing, start from first liked track
-                    if (likedSongs.length > 0) {
-                        playLikedTrack(0);
-                    }
+                } else if (likedSongs.length > 0) {
+                    playLikedTrack(0);
                 }
             };
         }
@@ -5531,7 +5612,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         likedSongs.forEach((liked, tIndex) => {
             const tr = document.createElement('tr');
-            tr.className = 'track-row';
+            tr.className = `track-row ${isLikedPlaylistCurrent && state.currentTrackIndex === tIndex ? 'active' : ''}`;
             const artSrc = liked.art || DEFAULT_ART_URL;
             const albumName = liked.album || 'Liked Songs';
             const dateAdded = liked.dateAdded ? formatDateAdded(liked.dateAdded) : '-';
@@ -5541,11 +5622,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td style="display:flex; align-items:center;">
                     <img src="${artSrc}" class="row-art">
                     <div>
-                        <div class="track-name-bold">${liked.trackName}</div>
-                        <div class="track-artist-small">${liked.artist}</div>
+                        <div class="track-name-bold">${escapeHtml(liked.trackName)}</div>
+                        <div class="track-artist-small">${escapeHtml(liked.artist)}</div>
                     </div>
                 </td>
-                <td style="color:var(--text-subdued); font-size:14px;">${albumName}</td>
+                <td style="color:var(--text-subdued); font-size:14px;">${escapeHtml(albumName)}</td>
                 <td style="color:var(--text-subdued); font-size:14px;">${dateAdded}</td>
                 <td style="text-align:right; color:var(--text-subdued); font-size:14px;">${duration}</td>
             `;
@@ -5557,18 +5638,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function playLikedTrack(likedIndex) {
-        const liked = likedSongs[likedIndex];
-        // Find the track in playlists
-        for (let pi = 0; pi < playlists.length; pi++) {
-            for (let ti = 0; ti < playlists[pi].tracks.length; ti++) {
-                const track = playlists[pi].tracks[ti];
-                if (track.name === liked.trackName && track.artist === liked.artist) {
-                    playTrack(pi, ti);
-                    return;
-                }
-            }
+        if (!likedSongs[likedIndex]) return;
+        const likedPlIndex = ensureLikedSongsPlaylist();
+        const track = playlists[likedPlIndex]?.tracks?.[likedIndex];
+        if (!track) {
+            showToast('Track not found in your library. It may have been removed.', 'fa-exclamation-triangle');
+            return;
         }
-        showToast('Track not found in your library. It may have been removed.', 'fa-exclamation-triangle');
+        playTrack(likedPlIndex, likedIndex);
     }
 
     init();
