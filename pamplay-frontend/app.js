@@ -1650,11 +1650,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const valid = [];
         const seen = new Set();
-        const source = Array.isArray(customIndices) ? customIndices : buildDefaultQueueIndices(plIndex, currentIndex);
+        const hasCustomOrder = Array.isArray(customIndices);
+        const source = hasCustomOrder ? customIndices : buildDefaultQueueIndices(plIndex, currentIndex);
         source.forEach((idx) => {
             const n = Number(idx);
             if (!Number.isInteger(n)) return;
-            if (n < currentIndex || n >= pl.tracks.length) return;
+            if (n < 0 || n >= pl.tracks.length) return;
+            if (!hasCustomOrder && n < currentIndex) return;
             if (seen.has(n)) return;
             seen.add(n);
             valid.push(n);
@@ -1691,6 +1693,51 @@ document.addEventListener('DOMContentLoaded', () => {
             const pos = state.queueIndices.indexOf(currentIndex);
             setQueueIndices(plIndex, currentIndex, state.queueIndices.slice(pos), state.queueExplicit);
         }
+    }
+
+    function buildShuffledQueueIndices(plIndex, currentIndex) {
+        const pl = playlists[plIndex];
+        if (!pl?.tracks?.length || currentIndex < 0) return [];
+        const rest = [];
+        for (let i = 0; i < pl.tracks.length; i++) {
+            if (i !== currentIndex) rest.push(i);
+        }
+        for (let i = rest.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [rest[i], rest[j]] = [rest[j], rest[i]];
+        }
+        return [currentIndex, ...rest];
+    }
+
+    function updateShuffleControlIcons() {
+        const color = state.isShuffle ? 'var(--primary)' : 'var(--text-subdued)';
+        document.querySelectorAll('#pl-shuffle, #liked-shuffle, .player-bar .fa-random').forEach((el) => {
+            el.style.color = color;
+        });
+    }
+
+    function startCollectionPlayback(plIndex, opts = {}) {
+        const pl = playlists[plIndex];
+        if (!pl?.tracks?.length) {
+            showToast('No songs to play yet', 'fa-music');
+            return;
+        }
+
+        const shuffle = !!opts.shuffle;
+        let startIndex = 0;
+        if (shuffle && pl.tracks.length > 1) {
+            startIndex = Math.floor(Math.random() * pl.tracks.length);
+        }
+
+        state.isShuffle = shuffle;
+        if (shuffle) {
+            setQueueIndices(plIndex, startIndex, buildShuffledQueueIndices(plIndex, startIndex), true);
+            showToast('Shuffle play', 'fa-random');
+        } else {
+            setQueueIndices(plIndex, startIndex, null, false);
+        }
+        updateShuffleControlIcons();
+        playTrack(plIndex, startIndex, { fromQueue: shuffle });
     }
 
     function escapeHtml(str) {
@@ -4271,7 +4318,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             
             <div class="pl-controls-bar">
-                <button class="play-circle-btn" id="pl-main-play"><i class="fas fa-play"></i></button>
+                <button class="play-circle-btn" id="pl-main-play"><i class="fas ${state.currentPlaylistIndex === plIndex && state.isPlaying ? 'fa-pause' : 'fa-play'}"></i></button>
                 <i class="fas fa-random pl-icon-btn" id="pl-shuffle" title="Shuffle" style="${state.isShuffle ? 'color:var(--primary)' : ''}"></i>
                 <i class="fas fa-arrow-circle-down pl-icon-btn" id="pl-download-all" title="Download All"></i>
                 <i class="fas fa-user-plus pl-icon-btn" title="Collaborate"></i>
@@ -4307,19 +4354,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Playlist interaction listeners
         document.getElementById('pl-main-play').onclick = () => {
-            if (state.currentPlaylistIndex === plIndex && state.isPlaying) {
-                // Already playing this playlist, toggle pause
-                togglePlay();
-            } else if (state.currentPlaylistIndex === plIndex && !state.isPlaying && audio.src) {
-                // Same playlist but paused, resume
+            if (state.currentPlaylistIndex === plIndex && audio.src) {
                 togglePlay();
             } else {
-                // Start playing from track 0
-                if (pl.tracks.length > 0) playTrack(plIndex, 0);
+                startCollectionPlayback(plIndex);
             }
         };
 
-        document.getElementById('pl-shuffle').onclick = toggleShuffle;
+        document.getElementById('pl-shuffle').onclick = () => startCollectionPlayback(plIndex, { shuffle: true });
 
         document.getElementById('pl-download-all').onclick = () => {
             alert('Downloading all tracks in this collection...');
@@ -4588,15 +4630,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function toggleShuffle() {
         state.isShuffle = !state.isShuffle;
-        const shuffleBtn = document.querySelector('#pl-shuffle');
-        if (shuffleBtn) {
-            shuffleBtn.style.color = state.isShuffle ? 'var(--primary)' : 'var(--text-subdued)';
+        if (state.currentPlaylistIndex >= 0 && state.currentTrackIndex >= 0) {
+            if (state.isShuffle) {
+                setQueueIndices(
+                    state.currentPlaylistIndex,
+                    state.currentTrackIndex,
+                    buildShuffledQueueIndices(state.currentPlaylistIndex, state.currentTrackIndex),
+                    true
+                );
+            } else {
+                setQueueIndices(state.currentPlaylistIndex, state.currentTrackIndex, null, false);
+            }
         }
-        // Also update player bar shuffle if it exists
-        const playerShuffle = document.querySelector('.player-bar .fa-random');
-        if (playerShuffle) {
-            playerShuffle.style.color = state.isShuffle ? 'var(--primary)' : 'var(--text-subdued)';
-        }
+        updateShuffleControlIcons();
+        showToast(state.isShuffle ? 'Shuffle On' : 'Shuffle Off', 'fa-random');
     }
 
     function downloadTrack(track) {
@@ -5586,15 +5633,15 @@ document.addEventListener('DOMContentLoaded', () => {
             likedPlayBtn.onclick = () => {
                 if (state.currentPlaylistIndex === likedPlIndex && audio.src) {
                     togglePlay();
-                } else if (likedSongs.length > 0) {
-                    playLikedTrack(0);
+                } else {
+                    startCollectionPlayback(likedPlIndex);
                 }
             };
         }
 
         // Shuffle button
         const shuffleBtn = document.getElementById('liked-shuffle');
-        if (shuffleBtn) shuffleBtn.onclick = toggleShuffle;
+        if (shuffleBtn) shuffleBtn.onclick = () => startCollectionPlayback(likedPlIndex, { shuffle: true });
 
         // Render tracks
         const tbody = document.getElementById('liked-track-list-body');
