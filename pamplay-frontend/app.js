@@ -5691,13 +5691,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function playLikedTrack(likedIndex) {
-        if (!likedSongs[likedIndex]) return;
-        const likedPlIndex = ensureLikedSongsPlaylist();
-        const track = playlists[likedPlIndex]?.tracks?.[likedIndex];
+        const liked = likedSongs[likedIndex];
+        if (!liked) return;
+        let likedPlIndex = ensureLikedSongsPlaylist();
+        let track = playlists[likedPlIndex]?.tracks?.[likedIndex];
+
         if (!track) {
-            showToast('Track not found in your library. It may have been removed.', 'fa-exclamation-triangle');
+            track = likedSongToPlayableTrack(liked);
+            likedPlIndex = upsertTempPlaylist(LIKED_SONGS_PLAYLIST_ID, 'Liked Songs', [track]);
+            playTrack(likedPlIndex, 0);
             return;
         }
+
         playTrack(likedPlIndex, likedIndex);
     }
 
