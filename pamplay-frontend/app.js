@@ -999,12 +999,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
                 case 'ArrowRight': // → = Next track
                     e.preventDefault();
-                    playNext();
+                    playNext(true, { userInitiated: true });
                     showToast('Next Track', 'fa-step-forward');
                     break;
                 case 'ArrowLeft': // ← = Previous track
                     e.preventDefault();
-                    playPrev();
+                    playPrev({ userInitiated: true });
                     showToast('Previous Track', 'fa-step-backward');
                     break;
                 case 'ArrowUp': // ↑ = Volume up
@@ -1184,8 +1184,8 @@ document.addEventListener('DOMContentLoaded', () => {
         playBtn.addEventListener('click', togglePlay);
 
         // Skip/Prev
-        nextBtn.addEventListener('click', playNext);
-        prevBtn.addEventListener('click', playPrev);
+        nextBtn.addEventListener('click', () => playNext(true, { userInitiated: true }));
+        prevBtn.addEventListener('click', () => playPrev({ userInitiated: true }));
 
         // Bars
         progressBar.addEventListener('click', seek);
@@ -4412,7 +4412,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function playTrack(plIndex, tIndex, opts = {}) {
         const autoNext = !!opts.autoNext;
         const fromQueue = !!opts.fromQueue;
-        const manualSwitch = !autoNext;
+        const manualSwitch = !!opts.userInitiated || !autoNext;
         const resolveTimeoutMs = manualSwitch ? 3500 : 7000;
         const readyTimeoutMs = manualSwitch ? 3500 : 6000;
         const retryReadyTimeoutMs = manualSwitch ? 2500 : 5000;
@@ -4483,6 +4483,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (token !== playRequestToken) return;
+        state.isBuffering = false;
+        state.isPlaying = true;
+        updatePlayerUI();
+        updateMediaSession(track);
 
         let ok = await waitForPlaybackReady(readyTimeoutMs);
         if (token !== playRequestToken) return;
@@ -4570,15 +4574,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function playNext(allowWrap = true) {
+    function playNext(allowWrap = true, opts = {}) {
         if (state.currentPlaylistIndex === -1) return;
+        const userInitiated = !!opts.userInitiated;
         const pl = playlists[state.currentPlaylistIndex];
         ensureQueueForCurrentTrack(state.currentPlaylistIndex, state.currentTrackIndex, { keepExisting: true });
 
         if (state.queueIndices.length > 1) {
             const nextIndex = state.queueIndices[1];
             setQueueIndices(state.currentPlaylistIndex, nextIndex, state.queueIndices.slice(1), state.queueExplicit);
-            playTrack(state.currentPlaylistIndex, nextIndex, { autoNext: true, fromQueue: true });
+            playTrack(state.currentPlaylistIndex, nextIndex, { autoNext: true, fromQueue: true, userInitiated });
             return;
         }
 
@@ -4620,14 +4625,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        playTrack(state.currentPlaylistIndex, state.currentTrackIndex, { autoNext: true });
+        playTrack(state.currentPlaylistIndex, state.currentTrackIndex, { autoNext: true, userInitiated });
     }
 
-    function playPrev() {
+    function playPrev(opts = {}) {
         if (state.currentPlaylistIndex === -1) return;
         const pl = playlists[state.currentPlaylistIndex];
         state.currentTrackIndex = (state.currentTrackIndex - 1 + pl.tracks.length) % pl.tracks.length;
-        playTrack(state.currentPlaylistIndex, state.currentTrackIndex);
+        playTrack(state.currentPlaylistIndex, state.currentTrackIndex, { userInitiated: !!opts.userInitiated });
     }
 
     function seek(e) {
