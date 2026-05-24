@@ -1591,7 +1591,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const SPOTIFY_RESOLVE_BATCH_SIZE = 12;
     const SPOTIFY_PREFETCH_CONCURRENCY = 4;
     const LIKED_SONGS_PLAYLIST_ID = '__liked_songs__';
-    let playbackRecoveryLock = false;
     let playRequestToken = 0;
     let autoSkipAttempts = 0;
     let spotifyAllTimePoolCache = null;
@@ -2344,21 +2343,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function playAudioWithTimeout(media, timeoutMs = 7000) {
-        let timer = null;
-        const started = Promise.resolve()
-            .then(() => media.play())
-            .then(() => true)
-            .catch((e) => {
-                console.warn('Audio play failed:', e);
-                return false;
-            });
+        const settleMs = Math.min(Math.max(timeoutMs, 0), 250);
+        let rejected = false;
+        try {
+            const playPromise = media.play();
+            if (playPromise && typeof playPromise.catch === 'function') {
+                playPromise.catch((e) => {
+                    rejected = true;
+                    console.warn('Audio play failed:', e);
+                });
+            }
+        } catch (e) {
+            console.warn('Audio play failed:', e);
+            return Promise.resolve(false);
+        }
 
-        const timedOut = new Promise((resolve) => {
-            timer = setTimeout(() => resolve(false), timeoutMs);
-        });
-
-        return Promise.race([started, timedOut]).finally(() => {
-            if (timer) clearTimeout(timer);
+        return new Promise((resolve) => {
+            setTimeout(() => resolve(!rejected && !media.error), settleMs);
         });
     }
 
@@ -4425,14 +4426,16 @@ document.addEventListener('DOMContentLoaded', () => {
             keepExisting: autoNext || fromQueue
         });
         state.isBuffering = true;
+        state.isPlaying = false;
         updatePlayerUI();
 
         let url = track.url;
         if (!url || track._unplayable) {
             url = await resolveTrackStreamSafe(track, true);
+            if (token !== playRequestToken) return;
         }
         if (!url) {
-            onPlaybackFailed(track, plIndex, tIndex, autoNext);
+            if (token === playRequestToken) onPlaybackFailed(track, plIndex, tIndex, autoNext);
             return;
         }
 
@@ -4453,12 +4456,14 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.warn('AudioContext resume failed', e);
         }
+        if (token !== playRequestToken) return;
 
         // Immediate, reliable switch.
         audio.pause();
         audio.currentTime = 0;
         audio.src = url;
         audio.preload = 'auto';
+        audio.load();
         audio.playbackRate = state.playbackSpeed;
         if (!state.isMuted) {
             currentSource.gain.gain.setValueAtTime(state.volume, audioCtx.currentTime);
@@ -4476,19 +4481,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let ok = await waitForPlaybackReady(6000);
         if (token !== playRequestToken) return;
-        if (!ok) {
-            playbackRecoveryLock = true;
+        if (!ok || audio.error || audio.paused) {
             const retryUrl = await resolveTrackStreamSafe(track, true);
-            playbackRecoveryLock = false;
             if (token !== playRequestToken) return;
             if (retryUrl && retryUrl !== url) {
                 playlists[plIndex].tracks[tIndex].url = retryUrl;
                 audio.pause();
                 audio.currentTime = 0;
                 audio.src = retryUrl;
+                audio.preload = 'auto';
+                audio.load();
                 try {
                     const retryStarted = await playAudioWithTimeout(audio, 7000);
-                    ok = retryStarted || await waitForPlaybackReady(5000);
+                    ok = retryStarted ? await waitForPlaybackReady(5000) : false;
+                    if (token !== playRequestToken) return;
                 } catch (e2) {
                     console.warn('Retry play failed:', e2);
                     ok = false;
@@ -4496,8 +4502,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        if (!ok) {
-            onPlaybackFailed(track, plIndex, tIndex, autoNext);
+        if (!ok || audio.error || audio.paused) {
+            if (token === playRequestToken) onPlaybackFailed(track, plIndex, tIndex, autoNext);
             return;
         }
 
