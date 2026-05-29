@@ -4513,6 +4513,8 @@ document.addEventListener('DOMContentLoaded', () => {
             beginPlaybackAttempt();
 
             audio.pause();
+            audio.removeAttribute('src');
+            audio.load();
             audio.currentTime = 0;
             audio.src = url;
             audio.load();
@@ -4550,6 +4552,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (retryUrl && retryUrl !== url) {
                     playlists[plIndex].tracks[tIndex].url = retryUrl;
                     audio.pause();
+                    audio.removeAttribute('src');
+                    audio.load();
                     audio.currentTime = 0;
                     audio.src = retryUrl;
                     audio.load();
