@@ -1384,8 +1384,25 @@ body.now-playing-open {
 
 .lang-search-results-grid {
     display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
     gap: 12px !important;
+}
+
+.lang-search-results-grid .lang-track-card {
+    width: 100%;
+    min-width: 0;
+}
+
+.lang-search-results-grid .lang-track-art {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+}
+
+@media (max-width: 1024px) {
+    .lang-search-results-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
 }
 
 /* ─── Responsive ─── */

@@ -898,7 +898,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     ...ls,
                     art: ls.artBlob ? URL.createObjectURL(ls.artBlob) : (ls.artUrl || ls.art || DEFAULT_ART_URL)
                 }));
-                
+                ensureLikedSongsPlaylist();
+
                 // Inject Audius liked tracks into temporary playlist so they can be played
                 const audiusLiked = likedSongs.filter(ls => ls.isAudius);
                 if (audiusLiked.length > 0) {
@@ -1568,6 +1569,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v4';
     const HOME_FEED_TTL_MS = 5 * 60 * 1000;
+    const CURATED_RESOLVED_CACHE_KEY = 'palmplay_curated_resolved_v1';
+    const CURATED_RESOLVED_TTL_MS = 60 * 60 * 1000;
+    const catalogRequestInflight = new Map();
     const PLAY_HISTORY_KEY = 'palmplay_play_history';
     const PLAY_HISTORY_MAX = 50;
     const RECENT_SEARCHES_KEY = 'palmplay_recent_searches';
@@ -1590,7 +1594,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const SPOTIFY_MAX_PLAYLIST_TRACKS_IMPORT = 200;
     const SPOTIFY_RESOLVE_BATCH_SIZE = 12;
     const SPOTIFY_PREFETCH_CONCURRENCY = 4;
-    let playbackRecoveryLock = false;
     let playRequestToken = 0;
     let autoSkipAttempts = 0;
     let spotifyAllTimePoolCache = null;
@@ -2150,7 +2153,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (t) t._unplayable = true;
     }
 
-    function onPlaybackFailed(track, plIndex, tIndex, autoNext = false) {
+    function onPlaybackFailed(track, plIndex, tIndex, autoNext = false, requestToken = null) {
+        if (requestToken != null && requestToken !== playRequestToken) return;
         markTrackUnplayable(plIndex, tIndex);
         showToast(`Can't play "${track.name}" — try another track`, 'fa-exclamation-triangle');
         state.isBuffering = false;
@@ -2167,9 +2171,7 @@ document.addEventListener('DOMContentLoaded', () => {
             autoSkipAttempts = 0;
             return;
         }
-        const nextIdx = (tIndex + 1) % pl.tracks.length;
-        if (nextIdx === tIndex) return;
-        setTimeout(() => playTrack(plIndex, nextIdx, { autoNext: true }), 150);
+        setTimeout(() => playNext(true), 150);
     }
 
     function prefetchUpcomingTrack(plIndex, tIndex) {
@@ -2271,7 +2273,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function waitForPlaybackReady(timeoutMs = 9000) {
         return new Promise((resolve) => {
-            if (audio.readyState >= 2 && !audio.error) {
+            const alreadyPlaying = !audio.paused && audio.currentTime > 0 && !audio.error;
+            if (alreadyPlaying || (audio.readyState >= 2 && !audio.error)) {
                 resolve(true);
                 return;
             }
@@ -2282,15 +2285,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearTimeout(timer);
                 audio.removeEventListener('playing', onPlaying);
                 audio.removeEventListener('canplay', onCanPlay);
+                audio.removeEventListener('loadeddata', onLoaded);
                 audio.removeEventListener('error', onError);
-                resolve(ok);
+                const playingNow = !audio.paused && audio.currentTime > 0 && !audio.error;
+                resolve(ok || playingNow || (audio.readyState >= 2 && !audio.error));
             };
             const onPlaying = () => finish(true);
             const onCanPlay = () => finish(true);
+            const onLoaded = () => finish(true);
             const onError = () => finish(false);
-            const timer = setTimeout(() => finish(!audio.error && audio.readyState >= 2), timeoutMs);
+            const timer = setTimeout(() => finish(false), timeoutMs);
             audio.addEventListener('playing', onPlaying, { once: true });
             audio.addEventListener('canplay', onCanPlay, { once: true });
+            audio.addEventListener('loadeddata', onLoaded, { once: true });
             audio.addEventListener('error', onError, { once: true });
         });
     }
@@ -2411,16 +2418,16 @@ document.addEventListener('DOMContentLoaded', () => {
         candidateLists.push(feed?.picks || []);
         candidateLists.push(feed?.trending || []);
         candidateLists.push((history || []).slice(0, 12));
-        candidateLists.push((await getSpotifyAllTimePool()).slice(0, 45));
+        candidateLists.push((feed?.trending || []).slice(0, 24));
 
-        const topArtists = Array.from(profile.artistScores.entries())
+        const topArtist = Array.from(profile.artistScores.entries())
             .sort((a, b) => b[1] - a[1])
-            .slice(0, 3)
+            .slice(0, 1)
             .map(([artist]) => artist)
-            .filter(Boolean);
-        if (topArtists.length) {
-            const artistResults = await Promise.all(topArtists.map((a) => fetchCatalogTracks(a, 8).catch(() => [])));
-            candidateLists.push(...artistResults);
+            .filter(Boolean)[0];
+        if (topArtist) {
+            const artistResults = await fetchCatalogTracks(topArtist, 6).catch(() => []);
+            if (artistResults.length) candidateLists.push(artistResults);
         }
 
         const all = candidateLists.flat().filter(t => t && t.url && t.name);
@@ -2544,12 +2551,38 @@ document.addEventListener('DOMContentLoaded', () => {
         return { track: bestTrack, score: bestScore };
     }
 
+    function getCachedCuratedTracks() {
+        try {
+            const raw = sessionStorage.getItem(CURATED_RESOLVED_CACHE_KEY);
+            if (!raw) return null;
+            const { ts, tracks } = JSON.parse(raw);
+            if (!tracks?.length || Date.now() - ts > CURATED_RESOLVED_TTL_MS) return null;
+            return tracks;
+        } catch {
+            return null;
+        }
+    }
+
+    function setCachedCuratedTracks(tracks) {
+        try {
+            sessionStorage.setItem(CURATED_RESOLVED_CACHE_KEY, JSON.stringify({
+                ts: Date.now(),
+                tracks: tracks || []
+            }));
+        } catch (e) {
+            console.warn('Curated cache write failed', e);
+        }
+    }
+
     async function fetchCuratedTrendingTracks(limit = 20) {
+        const cached = getCachedCuratedTracks();
+        if (cached?.length) return cached.slice(0, limit);
+
         const list = (window.PALMPLAY_CURATED_TRENDING || []).slice(0, limit);
         if (!list.length) return fetchAudiusCatalogFallback('trending', limit);
 
         const resolved = [];
-        const batchSize = 4;
+        const batchSize = 8;
         for (let i = 0; i < list.length; i += batchSize) {
             const batch = list.slice(i, i + batchSize);
             const chunk = await Promise.all(
@@ -2583,14 +2616,48 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             resolved.push(...chunk.filter(Boolean));
         }
-        return resolved.length ? resolved : fetchAudiusCatalogFallback('trending', limit);
+        const finalTracks = resolved.length ? resolved : await fetchAudiusCatalogFallback('trending', limit);
+        if (finalTracks?.length) setCachedCuratedTracks(finalTracks);
+        return finalTracks;
     }
 
     async function getSpotifyAllTimePool() {
         if (spotifyAllTimePoolCache?.length) return spotifyAllTimePoolCache;
-        const tracks = await fetchCuratedTrendingTracks(80);
-        spotifyAllTimePoolCache = organizeTracksForSelection(tracks, 80);
+        const homeCached = readHomeFeedCache();
+        if (homeCached?.trending?.length >= 12) {
+            spotifyAllTimePoolCache = organizeTracksForSelection(homeCached.trending, 40);
+            return spotifyAllTimePoolCache;
+        }
+        const curatedCached = getCachedCuratedTracks();
+        if (curatedCached?.length >= 12) {
+            spotifyAllTimePoolCache = organizeTracksForSelection(curatedCached, 40);
+            return spotifyAllTimePoolCache;
+        }
+        const tracks = await fetchCuratedTrendingTracks(24);
+        spotifyAllTimePoolCache = organizeTracksForSelection(tracks, 40);
         return spotifyAllTimePoolCache;
+    }
+
+    function readHomeFeedCache() {
+        try {
+            const cached = sessionStorage.getItem(HOME_FEED_CACHE_KEY);
+            if (!cached) return null;
+            const { data } = JSON.parse(cached);
+            return data || null;
+        } catch {
+            return null;
+        }
+    }
+
+    function getHomeFeedCacheAgeMs() {
+        try {
+            const cached = sessionStorage.getItem(HOME_FEED_CACHE_KEY);
+            if (!cached) return Infinity;
+            const { ts } = JSON.parse(cached);
+            return Date.now() - (ts || 0);
+        } catch {
+            return Infinity;
+        }
     }
 
     async function fetchHomeFeed() {
@@ -2604,10 +2671,16 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('Home feed cache read failed', e);
         }
 
-        const [trending, picks] = await Promise.all([
-            fetchCuratedTrendingTracks(20),
-            fetchCatalogTracks('latest hits', 12)
-        ]);
+        const trending = await fetchCuratedTrendingTracks(20);
+        let picks = [];
+        try {
+            picks = await fetchCatalogTracks('latest hits', 8);
+        } catch (e) {
+            console.warn('Home picks fetch failed', e);
+        }
+        if (!picks.length && trending.length) {
+            picks = trending.slice(8, 20);
+        }
 
         const data = { trending: trending || [], picks: picks || [] };
         try {
@@ -3787,6 +3860,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function createLangTrackCard(track, plIndex, tIdx) {
+        const card = document.createElement('div');
+        card.className = 'lang-track-card card--has-menu';
+        const playsLabel = track.plays > 0 ? `${(track.plays / 1000).toFixed(0)}K` : '';
+        card.innerHTML = `
+            <div class="lang-track-art" style="background-image: url('${escapeHtml(track.art || DEFAULT_ART_URL)}')">
+                <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+                ${playsLabel ? `<span class="plays-badge"><i class="fas fa-headphones" style="margin-right:3px"></i>${playsLabel}</span>` : ''}
+            </div>
+            <div class="lang-track-name">${escapeHtml(track.name)}</div>
+            <div class="lang-track-artist">${escapeHtml(track.artist)}</div>
+        `;
+        card.onclick = () => playTrack(plIndex, tIdx);
+        attachCardActions(card, track, plIndex, tIdx);
+        return card;
+    }
+
     function createTrackCard(track, plIndex, tIdx, options = {}) {
         const card = document.createElement('div');
         card.className = 'card audius-card';
@@ -4014,6 +4104,73 @@ document.addEventListener('DOMContentLoaded', () => {
         parent.appendChild(section);
     }
 
+    function paintHomeFeed(feed, options = {}) {
+        const savedUser = getSavedUser();
+        const isLoggedIn = isUserLoggedIn();
+        const history = getPlayHistory().slice(0, 12);
+
+        cardGrid.innerHTML = '';
+
+        if (!isLoggedIn) renderHomeLoginBanner(cardGrid);
+
+        if (options.forYouTracks?.length) {
+            renderTrackRow(
+                cardGrid,
+                'For you',
+                'Based on your listens, likes, and feedback',
+                options.forYouTracks,
+                'home_for_you',
+                { cardOptions: { showFeedback: true } }
+            );
+        }
+
+        if (history.length) {
+            renderTrackRow(cardGrid, 'Continue listening', 'Pick up where you left off', history, 'home_continue');
+        }
+
+        renderTrackRow(cardGrid, 'Trending now', 'Popular on PalmPlay', feed.trending, 'home_trending');
+        renderTrackRow(cardGrid, 'Fresh picks', 'Curated for you', feed.picks, 'home_picks');
+
+        renderHomeQuickActions(cardGrid);
+
+        if (isLoggedIn) {
+            renderLikedPreview(cardGrid);
+            renderHomeLibrarySection(cardGrid, savedUser);
+        }
+    }
+
+    function loadHomeForYouRow(feed) {
+        const history = getPlayHistory().slice(0, 12);
+        fetchForYouTracks(feed, history)
+            .then((forYouTracks) => {
+                if (state.currentView !== 'home' || !forYouTracks?.length) return;
+                const existing = cardGrid.querySelector('[data-home-section="for-you"]');
+                if (existing) return;
+                const section = document.createElement('section');
+                section.className = 'home-section';
+                section.setAttribute('data-home-section', 'for-you');
+                section.innerHTML = `
+                    <div class="home-section-head">
+                        <div>
+                            <h3 class="home-section-title">For you</h3>
+                            <p class="home-section-sub">Based on your listens, likes, and feedback</p>
+                        </div>
+                    </div>
+                    <div class="home-section-grid card-grid"></div>
+                `;
+                const grid = section.querySelector('.home-section-grid');
+                const organizedTracks = organizeTracksForSelection(forYouTracks, forYouTracks.length);
+                const plIndex = upsertTempPlaylist('home_for_you', 'For you', organizedTracks);
+                organizedTracks.forEach((track, tIdx) => {
+                    grid.appendChild(createTrackCard(track, plIndex, tIdx, { showFeedback: true }));
+                });
+                const banner = cardGrid.querySelector('.home-login-banner');
+                if (banner) banner.insertAdjacentElement('afterend', section);
+                else cardGrid.prepend(section);
+            })
+            .catch((e) => console.warn('For You generation failed', e));
+    }
+
     async function renderHome() {
         document.body.classList.remove('lang-view-active');
         state.currentView = 'home';
@@ -4045,46 +4202,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
         cardGrid.className = 'card-grid home-feed';
         cardGrid.style.display = 'block';
-        cardGrid.innerHTML = `<div class="home-loading">${skeletonCardGrid(6)}</div>`;
 
+        const cachedFeed = readHomeFeedCache();
+        if (cachedFeed) {
+            paintHomeFeed(cachedFeed);
+            loadHomeForYouRow(cachedFeed);
+            if (getHomeFeedCacheAgeMs() > 45000) {
+                fetchHomeFeed()
+                    .then((fresh) => {
+                        if (state.currentView !== 'home' || !fresh) return;
+                        paintHomeFeed(fresh);
+                        loadHomeForYouRow(fresh);
+                    })
+                    .catch((e) => console.warn('Home feed refresh failed', e));
+            }
+            return;
+        }
+
+        cardGrid.innerHTML = `<div class="home-loading">${skeletonCardGrid(6)}</div>`;
         const feed = await fetchHomeFeed();
         if (state.currentView !== 'home') return;
-
-        const history = getPlayHistory().slice(0, 12);
-        let forYouTracks = [];
-        try {
-            forYouTracks = await fetchForYouTracks(feed, history);
-        } catch (e) {
-            console.warn('For You generation failed', e);
-        }
-        cardGrid.innerHTML = '';
-
-        if (!isLoggedIn) renderHomeLoginBanner(cardGrid);
-
-        if (forYouTracks.length) {
-            renderTrackRow(
-                cardGrid,
-                'For you',
-                'Based on your listens, likes, and feedback',
-                forYouTracks,
-                'home_for_you',
-                { cardOptions: { showFeedback: true } }
-            );
-        }
-
-        if (history.length) {
-            renderTrackRow(cardGrid, 'Continue listening', 'Pick up where you left off', history, 'home_continue');
-        }
-
-        renderTrackRow(cardGrid, 'Trending now', 'Popular on PalmPlay', feed.trending, 'home_trending');
-        renderTrackRow(cardGrid, 'Fresh picks', 'Curated for you', feed.picks, 'home_picks');
-
-        renderHomeQuickActions(cardGrid);
-
-        if (isLoggedIn) {
-            renderLikedPreview(cardGrid);
-            renderHomeLibrarySection(cardGrid, savedUser);
-        }
+        paintHomeFeed(feed);
+        loadHomeForYouRow(feed);
     }
 
     async function renderExplore(category) {
@@ -4292,7 +4431,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function playTrack(plIndex, tIndex, opts = {}) {
         const autoNext = !!opts.autoNext;
         const fromQueue = !!opts.fromQueue;
-        if (playbackRecoveryLock) return;
         const token = ++playRequestToken;
         state.currentPlaylistIndex = plIndex;
         state.currentTrackIndex = tIndex;
@@ -4304,8 +4442,10 @@ document.addEventListener('DOMContentLoaded', () => {
         updatePlayerUI();
         let track = playlists[plIndex]?.tracks?.[tIndex];
         if (!track) {
-            state.isBuffering = false;
-            updatePlayerUI();
+            if (token === playRequestToken) {
+                state.isBuffering = false;
+                updatePlayerUI();
+            }
             return;
         }
 
@@ -4313,8 +4453,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!url || track._unplayable) {
             url = await resolveTrackStreamSafe(track, true);
         }
+        if (token !== playRequestToken) return;
         if (!url) {
-            onPlaybackFailed(track, plIndex, tIndex, autoNext);
+            onPlaybackFailed(track, plIndex, tIndex, autoNext, token);
             return;
         }
 
@@ -4356,9 +4497,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let ok = await waitForPlaybackReady(6000);
         if (token !== playRequestToken) return;
         if (!ok) {
-            playbackRecoveryLock = true;
             const retryUrl = await resolveTrackStreamSafe(track, true);
-            playbackRecoveryLock = false;
             if (token !== playRequestToken) return;
             if (retryUrl && retryUrl !== url) {
                 playlists[plIndex].tracks[tIndex].url = retryUrl;
@@ -4375,8 +4514,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        if (token !== playRequestToken) return;
         if (!ok) {
-            onPlaybackFailed(track, plIndex, tIndex, autoNext);
+            onPlaybackFailed(track, plIndex, tIndex, autoNext, token);
             return;
         }
 
@@ -4402,7 +4542,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function togglePlay() {
         if (!audio.src) return;
-        if (state.isBuffering) return;
+        if (state.isBuffering && !state.isPlaying) return;
         if (state.isPlaying) {
             audio.pause();
             state.isPlaying = false;
@@ -4438,16 +4578,17 @@ document.addEventListener('DOMContentLoaded', () => {
     function playNext(allowWrap = true) {
         if (state.currentPlaylistIndex === -1) return;
         const pl = playlists[state.currentPlaylistIndex];
+        if (!pl?.tracks?.length) return;
         ensureQueueForCurrentTrack(state.currentPlaylistIndex, state.currentTrackIndex, { keepExisting: true });
 
-        if (state.queueIndices.length > 1) {
-            const nextIndex = state.queueIndices[1];
-            setQueueIndices(state.currentPlaylistIndex, nextIndex, state.queueIndices.slice(1), state.queueExplicit);
+        const queuePos = state.queueIndices.indexOf(state.currentTrackIndex);
+        if (queuePos >= 0 && queuePos < state.queueIndices.length - 1) {
+            const nextIndex = state.queueIndices[queuePos + 1];
             playTrack(state.currentPlaylistIndex, nextIndex, { autoNext: true, fromQueue: true });
             return;
         }
 
-        if (state.queueExplicit && state.queueIndices.length <= 1) {
+        if (state.queueExplicit) {
             state.isPlaying = false;
             updatePlayerUI();
             return;
@@ -4491,8 +4632,23 @@ document.addEventListener('DOMContentLoaded', () => {
     function playPrev() {
         if (state.currentPlaylistIndex === -1) return;
         const pl = playlists[state.currentPlaylistIndex];
-        state.currentTrackIndex = (state.currentTrackIndex - 1 + pl.tracks.length) % pl.tracks.length;
-        playTrack(state.currentPlaylistIndex, state.currentTrackIndex);
+        if (!pl?.tracks?.length) return;
+
+        if (audio.currentTime > 3) {
+            audio.currentTime = 0;
+            return;
+        }
+
+        ensureQueueForCurrentTrack(state.currentPlaylistIndex, state.currentTrackIndex, { keepExisting: true });
+        const queuePos = state.queueIndices.indexOf(state.currentTrackIndex);
+        if (queuePos > 0) {
+            const prevIndex = state.queueIndices[queuePos - 1];
+            playTrack(state.currentPlaylistIndex, prevIndex);
+            return;
+        }
+
+        const prevIndex = (state.currentTrackIndex - 1 + pl.tracks.length) % pl.tracks.length;
+        playTrack(state.currentPlaylistIndex, prevIndex);
     }
 
     function seek(e) {
@@ -4681,6 +4837,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchCatalogTracks(query, limit = 30) {
+        const q = String(query || '').trim();
+        if (!q) return [];
+        const inflightKey = `${q.toLowerCase()}::${limit}`;
+        if (catalogRequestInflight.has(inflightKey)) {
+            return catalogRequestInflight.get(inflightKey);
+        }
+        const request = fetchCatalogTracksInternal(q, limit);
+        catalogRequestInflight.set(inflightKey, request);
+        try {
+            return await request;
+        } finally {
+            catalogRequestInflight.delete(inflightKey);
+        }
+    }
+
+    async function fetchCatalogTracksInternal(query, limit = 30) {
         if (catalogTraffic.shouldUseAudius()) {
             return fetchAudiusCatalogFallback(query, limit);
         }
@@ -4691,7 +4863,7 @@ document.addEventListener('DOMContentLoaded', () => {
         catalogTraffic.recordStart();
         try {
             const url = `${MUSIC_CATALOG_API_BASE}/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`;
-            const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+            const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
             const data = await res.json();
             const results = data?.data?.results;
             if (!Array.isArray(results) || results.length === 0) {
@@ -5104,14 +5276,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const moodChipsRow = cardGrid.querySelector('.lang-mood-chips-row');
         const moodRowsContainer = cardGrid.querySelector('.lang-mood-rows');
 
-        // Resolve healthy API host once
-        let apiHost = AUDIUS_HOST;
-        try {
-            const hostRes = await fetch(AUDIUS_DISCOVERY_URL, { signal: AbortSignal.timeout(3000) });
-            const hostData = await hostRes.json();
-            if (hostData?.data?.length > 0) apiHost = hostData.data[0];
-        } catch(_) {}
-
         if (searchInput) {
             searchInput.addEventListener('input', (e) => {
                 const query = e.target.value.trim();
@@ -5133,15 +5297,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 resultsGrid.innerHTML = '<div style="padding:20px; color:var(--text-subdued);"><i class="fas fa-spinner fa-spin"></i> Searching inside ' + lang.name + '...</div>';
 
                 langSearchTimeout = setTimeout(async () => {
+                    if (state.currentView !== 'language') return;
                     try {
-                        const tracks = await fetchCatalogTracks(`${lang.name} ${query}`, 30);
+                        const tracks = await fetchCatalogTracks(`${lang.name} ${query}`, 20);
 
                         if (tracks.length === 0) {
                             resultsGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No matching ' + lang.name + ' tracks found.</p>';
                             return;
                         }
 
-                        // Create temporary playlist for search results
                         const plId = `lang_search_${lang.name}`;
                         let plIdx = playlists.findIndex(p => p.id === plId);
                         if (plIdx === -1) {
@@ -5153,86 +5317,82 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         resultsGrid.innerHTML = '';
                         tracks.forEach((track, tIdx) => {
-                            resultsGrid.appendChild(createTrackCard(track, plIdx, tIdx));
+                            resultsGrid.appendChild(createLangTrackCard(track, plIdx, tIdx));
                         });
                     } catch (err) {
                         resultsGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Error loading tracks.</p>';
                     }
-                }, 500);
+                }, 350);
             });
         }
 
-        // Use a stable Spotify-inspired all-time pool (instead of random mood queries)
-        let allMoodTracks = [];
-        const pool = await getSpotifyAllTimePool();
-        const poolSize = pool.length;
-        for (const mood of lang.moods) {
-            const safeId = mood.replace(/[^a-zA-Z]/g, '');
-            const grid = document.getElementById(`mood-grid-${safeId}`);
-            if (!grid) continue;
+        const renderLanguageMoodsFromPool = (pool) => {
+            if (state.currentView !== 'language') return;
+            let allMoodTracks = [];
+            const poolSize = pool.length;
+            for (const mood of lang.moods) {
+                const safeId = mood.replace(/[^a-zA-Z]/g, '');
+                const grid = document.getElementById(`mood-grid-${safeId}`);
+                if (!grid) continue;
 
-            try {
-                if (!poolSize) {
-                    grid.innerHTML = '<p class="mood-empty">No tracks found for this mood.</p>';
-                    continue;
+                try {
+                    if (!poolSize) {
+                        grid.innerHTML = '<p class="mood-empty">No tracks found for this mood.</p>';
+                        continue;
+                    }
+                    const moodIdx = lang.moods.indexOf(mood);
+                    const tracksPerMood = Math.min(10, poolSize);
+                    const tracks = [];
+                    for (let i = 0; i < tracksPerMood; i++) {
+                        const idx = (moodIdx * 3 + i) % poolSize;
+                        const t = pool[idx];
+                        if (t) tracks.push(t);
+                    }
+
+                    if (tracks.length === 0) {
+                        grid.innerHTML = '<p class="mood-empty">No tracks found for this mood.</p>';
+                        continue;
+                    }
+
+                    const plId = `lang_${lang.name}_${safeId}`;
+                    let plIdx = playlists.findIndex(p => p.id === plId);
+                    if (plIdx === -1) {
+                        plIdx = playlists.length;
+                        playlists.push({ id: plId, name: `${lang.name} ${mood}`, tracks: [], isTemporary: true });
+                    }
+
+                    playlists[plIdx].tracks = tracks;
+                    allMoodTracks = allMoodTracks.concat(tracks.map((_, i) => ({ plIdx, tIdx: i })));
+
+                    grid.innerHTML = '';
+                    tracks.forEach((track, tIdx) => {
+                        grid.appendChild(createLangTrackCard(track, plIdx, tIdx));
+                    });
+                } catch (e) {
+                    grid.innerHTML = '<p class="mood-empty">Failed to load.</p>';
                 }
-                const moodIdx = lang.moods.indexOf(mood);
-                const tracksPerMood = Math.min(10, poolSize);
-                const tracks = [];
-                for (let i = 0; i < tracksPerMood; i++) {
-                    const idx = (moodIdx * 3 + i) % poolSize;
-                    const t = pool[idx];
-                    if (t) tracks.push(t);
-                }
-
-                if (tracks.length === 0) {
-                    grid.innerHTML = '<p class="mood-empty">No tracks found for this mood.</p>';
-                    continue;
-                }
-
-                // Create playlist for this mood
-                const plId = `lang_${lang.name}_${safeId}`;
-                let plIdx = playlists.findIndex(p => p.id === plId);
-                if (plIdx === -1) {
-                    plIdx = playlists.length;
-                    playlists.push({ id: plId, name: `${lang.name} ${mood}`, tracks: [], isTemporary: true });
-                }
-
-                playlists[plIdx].tracks = tracks;
-                allMoodTracks = allMoodTracks.concat(tracks.map((t, i) => ({ plIdx, tIdx: i })));
-
-                grid.innerHTML = '';
-                tracks.forEach((track, tIdx) => {
-                    const card = document.createElement('div');
-                    card.className = 'lang-track-card card--has-menu';
-                    const playsLabel = track.plays > 0 ? `${(track.plays / 1000).toFixed(0)}K` : '';
-                    card.innerHTML = `
-                        <div class="lang-track-art" style="background-image: url('${escapeHtml(track.art)}')">
-                            <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
-                            ${playsLabel ? `<span class="plays-badge"><i class="fas fa-headphones" style="margin-right:3px"></i>${playsLabel}</span>` : ''}
-                        </div>
-                        <div class="lang-track-name">${escapeHtml(track.name)}</div>
-                        <div class="lang-track-artist">${escapeHtml(track.artist)}</div>
-                    `;
-                    card.onclick = () => playTrack(plIdx, tIdx);
-                    attachCardActions(card, track, plIdx, tIdx);
-                    grid.appendChild(card);
-                });
-
-            } catch (e) {
-                grid.innerHTML = '<p class="mood-empty">Failed to load.</p>';
             }
-        }
 
-        // Play All button: play first available track
-        const playAllBtn = document.getElementById('lang-play-all');
-        if (playAllBtn && allMoodTracks.length > 0) {
-            playAllBtn.onclick = () => {
-                const first = allMoodTracks[0];
-                playTrack(first.plIdx, first.tIdx);
-                showToast(`Playing ${lang.name} Collection`, 'fa-play');
-            };
-        }
+            const playAllBtn = document.getElementById('lang-play-all');
+            if (playAllBtn && allMoodTracks.length > 0) {
+                playAllBtn.onclick = () => {
+                    const first = allMoodTracks[0];
+                    playTrack(first.plIdx, first.tIdx);
+                    showToast(`Playing ${lang.name} Collection`, 'fa-play');
+                };
+            }
+        };
+
+        getSpotifyAllTimePool()
+            .then(renderLanguageMoodsFromPool)
+            .catch((e) => {
+                console.warn('Language mood pool failed', e);
+                lang.moods.forEach((mood) => {
+                    const safeId = mood.replace(/[^a-zA-Z]/g, '');
+                    const grid = document.getElementById(`mood-grid-${safeId}`);
+                    if (grid) grid.innerHTML = '<p class="mood-empty">Failed to load.</p>';
+                });
+            });
     }
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -5363,6 +5523,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Liked Songs Helpers ---
 
+    const LIKED_PLAYLIST_ID = 'liked_songs_playback';
+
+    function likedEntryToTrack(ls) {
+        return {
+            id: ls.externalId || ls.id || null,
+            name: ls.trackName || ls.name || 'Unknown',
+            artist: ls.artist || 'Unknown',
+            album: ls.album || 'Liked Songs',
+            duration: ls.duration || 0,
+            url: ls.url || ls.streamUrl || null,
+            art: ls.art || ls.artUrl || DEFAULT_ART_URL,
+            isCatalog: !!ls.isCatalog,
+            isAudius: !!ls.isAudius,
+            isCatalogFallback: !!ls.isCatalogFallback,
+            dateAdded: ls.dateAdded || null
+        };
+    }
+
+    function ensureLikedSongsPlaylist() {
+        let plIdx = playlists.findIndex((p) => p.id === LIKED_PLAYLIST_ID);
+        if (plIdx === -1) {
+            playlists.push({
+                id: LIKED_PLAYLIST_ID,
+                name: 'Liked Songs',
+                tracks: [],
+                isTemporary: true
+            });
+            plIdx = playlists.length - 1;
+        }
+        playlists[plIdx].tracks = likedSongs.map(likedEntryToTrack);
+        return plIdx;
+    }
+
     function isTrackLiked(track) {
         return likedSongs.some(ls => ls.trackName === track.name && ls.artist === track.artist);
     }
@@ -5401,6 +5594,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 artBlob: track.artBlob || null,
                 playlistId: playlists[plIndex]?.id || null,
                 trackIndex: tIndex,
+                externalId: track.id || null,
                 isAudius: track.isAudius || false,
                 isCatalog: track.isCatalog || false,
                 url: track.url || null,
@@ -5429,6 +5623,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (last) window.PalmPlaySync?.pushLike?.(last).catch((e) => console.warn('Cloud like', e));
         }
 
+        ensureLikedSongsPlaylist();
         renderSidebar();
 
         // Refresh liked songs view if currently showing
@@ -5557,18 +5752,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function playLikedTrack(likedIndex) {
-        const liked = likedSongs[likedIndex];
-        // Find the track in playlists
-        for (let pi = 0; pi < playlists.length; pi++) {
-            for (let ti = 0; ti < playlists[pi].tracks.length; ti++) {
-                const track = playlists[pi].tracks[ti];
-                if (track.name === liked.trackName && track.artist === liked.artist) {
-                    playTrack(pi, ti);
-                    return;
-                }
-            }
+        if (likedIndex < 0 || likedIndex >= likedSongs.length) return;
+        const plIdx = ensureLikedSongsPlaylist();
+        if (!playlists[plIdx]?.tracks?.length) {
+            showToast('No liked songs to play', 'fa-heart');
+            return;
         }
-        showToast('Track not found in your library. It may have been removed.', 'fa-exclamation-triangle');
+        const safeIndex = Math.min(likedIndex, playlists[plIdx].tracks.length - 1);
+        playTrack(plIdx, safeIndex);
     }
 
     init();
