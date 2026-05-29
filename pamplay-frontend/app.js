@@ -2166,6 +2166,12 @@ document.addEventListener('DOMContentLoaded', () => {
         ]);
     }
 
+    function beginPlaybackAttempt() {
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume().catch((e) => console.warn('AudioContext resume failed', e));
+        }
+    }
+
     function markTrackUnplayable(plIndex, tIndex) {
         const t = playlists[plIndex]?.tracks?.[tIndex];
         if (t) t._unplayable = true;
@@ -4465,10 +4471,6 @@ document.addEventListener('DOMContentLoaded', () => {
             forceReset: !autoNext && !fromQueue,
             keepExisting: autoNext || fromQueue
         });
-        state.isBuffering = true;
-        state.isPlaying = false;
-        updatePlayerUI();
-
         try {
             let track = playlists[plIndex]?.tracks?.[tIndex];
             if (!track) {
@@ -4478,8 +4480,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             let url = track.url;
-            if (!url || track._unplayable) {
-                url = await resolveTrackStreamSafe(track, true);
+            const needsResolve = !url || track._unplayable;
+            state.isBuffering = needsResolve;
+            state.isPlaying = false;
+            updatePlayerUI();
+
+            if (needsResolve) {
+                url = await resolveTrackStreamSafe(track, true, autoNext ? 5000 : 7000);
             }
             if (isStale()) return;
             if (!url) {
@@ -4499,11 +4506,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.recentPlayback = state.recentPlayback.slice(-12);
             }
 
-            try {
-                if (audioCtx.state === 'suspended') await audioCtx.resume();
-            } catch (e) {
-                console.warn('AudioContext resume failed', e);
-            }
+            beginPlaybackAttempt();
 
             audio.pause();
             audio.currentTime = 0;
@@ -4526,19 +4529,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (isStale()) return;
 
-            if (playStarted || isAudioReadyToPlay()) {
-                state.isBuffering = false;
-                state.isPlaying = !audio.paused;
-                updatePlayerUI();
-            }
+            // Never leave UI stuck on spinner — unlock immediately after play() attempt.
+            state.isBuffering = false;
+            state.isPlaying = playStarted && !audio.paused;
+            updatePlayerUI();
 
-            let ok = isAudioReadyToPlay();
-            if (!ok && playStarted) {
-                ok = await waitForPlaybackReady(3500);
+            let ok = playStarted || isAudioReadyToPlay();
+            if (!ok) {
+                ok = await waitForPlaybackReady(2000);
             }
             if (isStale()) return;
 
-            if (!ok) {
+            if (!ok && audio.error) {
                 const retryUrl = await resolveTrackStreamSafe(track, true);
                 if (isStale()) return;
                 if (retryUrl && retryUrl !== url) {
@@ -4547,19 +4549,32 @@ document.addEventListener('DOMContentLoaded', () => {
                     audio.currentTime = 0;
                     audio.src = retryUrl;
                     audio.load();
+                    state.isBuffering = true;
+                    updatePlayerUI();
                     try {
                         await audio.play();
-                        ok = await waitForPlaybackReady(3500);
+                        playStarted = true;
                     } catch (e2) {
                         console.warn('Retry play failed:', e2);
-                        ok = false;
                     }
+                    if (isStale()) return;
+                    state.isBuffering = false;
+                    state.isPlaying = playStarted && !audio.paused;
+                    updatePlayerUI();
+                    ok = playStarted || isAudioReadyToPlay();
                 }
             }
 
             if (isStale()) return;
             if (!ok) {
-                onPlaybackFailed(track, plIndex, tIndex, autoNext, token);
+                state.isBuffering = false;
+                state.isPlaying = false;
+                updatePlayerUI();
+                if (autoNext) {
+                    onPlaybackFailed(track, plIndex, tIndex, autoNext, token);
+                } else {
+                    showToast('Tap play to start this track', 'fa-play');
+                }
                 return;
             }
 
