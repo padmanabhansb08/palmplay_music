@@ -797,6 +797,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         await loadFromDatabase();
+        setMasterVolume(state.isMuted ? 0 : state.volume);
+        if (currentSource.gain) {
+            currentSource.gain.gain.setValueAtTime(state.isMuted ? 0 : state.volume, audioCtx.currentTime);
+        }
         updatePlayerUI();
         routeInitialView();
         let spotifyHandled = false;
@@ -1369,6 +1373,20 @@ document.addEventListener('DOMContentLoaded', () => {
         audio.onpause = () => {
             state.isPlaying = false;
             updatePlayerUI();
+        };
+
+        audio.onloadedmetadata = () => {
+            if (audio.duration && isFinite(audio.duration)) {
+                timeTotal.textContent = formatTime(audio.duration);
+            }
+        };
+
+        audio.onerror = () => {
+            if (state.isBuffering) {
+                state.isBuffering = false;
+                state.isPlaying = false;
+                updatePlayerUI();
+            }
         };
 
         audio.onended = () => {
@@ -2154,7 +2172,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function onPlaybackFailed(track, plIndex, tIndex, autoNext = false, requestToken = null) {
-        if (requestToken != null && requestToken !== playRequestToken) return;
+        const isCurrent = requestToken == null || requestToken === playRequestToken;
+        if (!isCurrent) return;
         markTrackUnplayable(plIndex, tIndex);
         showToast(`Can't play "${track.name}" — try another track`, 'fa-exclamation-triangle');
         state.isBuffering = false;
@@ -2271,33 +2290,39 @@ document.addEventListener('DOMContentLoaded', () => {
         history.replaceState(null, '', clean);
     }
 
-    function waitForPlaybackReady(timeoutMs = 9000) {
+    function isAudioReadyToPlay() {
+        if (!audio.src || audio.error) return false;
+        if (!audio.paused) return true;
+        return audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    }
+
+    function waitForPlaybackReady(timeoutMs = 4000) {
         return new Promise((resolve) => {
-            const alreadyPlaying = !audio.paused && audio.currentTime > 0 && !audio.error;
-            if (alreadyPlaying || (audio.readyState >= 2 && !audio.error)) {
+            if (isAudioReadyToPlay()) {
                 resolve(true);
                 return;
             }
             let settled = false;
-            const finish = (ok) => {
+            const finish = () => {
                 if (settled) return;
                 settled = true;
                 clearTimeout(timer);
-                audio.removeEventListener('playing', onPlaying);
-                audio.removeEventListener('canplay', onCanPlay);
-                audio.removeEventListener('loadeddata', onLoaded);
+                audio.removeEventListener('playing', onReady);
+                audio.removeEventListener('canplay', onReady);
+                audio.removeEventListener('loadeddata', onReady);
+                audio.removeEventListener('loadedmetadata', onReady);
+                audio.removeEventListener('canplaythrough', onReady);
                 audio.removeEventListener('error', onError);
-                const playingNow = !audio.paused && audio.currentTime > 0 && !audio.error;
-                resolve(ok || playingNow || (audio.readyState >= 2 && !audio.error));
+                resolve(isAudioReadyToPlay());
             };
-            const onPlaying = () => finish(true);
-            const onCanPlay = () => finish(true);
-            const onLoaded = () => finish(true);
-            const onError = () => finish(false);
-            const timer = setTimeout(() => finish(false), timeoutMs);
-            audio.addEventListener('playing', onPlaying, { once: true });
-            audio.addEventListener('canplay', onCanPlay, { once: true });
-            audio.addEventListener('loadeddata', onLoaded, { once: true });
+            const onReady = () => finish();
+            const onError = () => finish();
+            const timer = setTimeout(finish, timeoutMs);
+            audio.addEventListener('playing', onReady, { once: true });
+            audio.addEventListener('canplay', onReady, { once: true });
+            audio.addEventListener('loadeddata', onReady, { once: true });
+            audio.addEventListener('loadedmetadata', onReady, { once: true });
+            audio.addEventListener('canplaythrough', onReady, { once: true });
             audio.addEventListener('error', onError, { once: true });
         });
     }
@@ -4432,6 +4457,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const autoNext = !!opts.autoNext;
         const fromQueue = !!opts.fromQueue;
         const token = ++playRequestToken;
+        const isStale = () => token !== playRequestToken;
+
         state.currentPlaylistIndex = plIndex;
         state.currentTrackIndex = tIndex;
         ensureQueueForCurrentTrack(plIndex, tIndex, {
@@ -4439,104 +4466,130 @@ document.addEventListener('DOMContentLoaded', () => {
             keepExisting: autoNext || fromQueue
         });
         state.isBuffering = true;
+        state.isPlaying = false;
         updatePlayerUI();
-        let track = playlists[plIndex]?.tracks?.[tIndex];
-        if (!track) {
-            if (token === playRequestToken) {
+
+        try {
+            let track = playlists[plIndex]?.tracks?.[tIndex];
+            if (!track) {
                 state.isBuffering = false;
                 updatePlayerUI();
+                return;
             }
-            return;
-        }
 
-        let url = track.url;
-        if (!url || track._unplayable) {
-            url = await resolveTrackStreamSafe(track, true);
-        }
-        if (token !== playRequestToken) return;
-        if (!url) {
-            onPlaybackFailed(track, plIndex, tIndex, autoNext, token);
-            return;
-        }
+            let url = track.url;
+            if (!url || track._unplayable) {
+                url = await resolveTrackStreamSafe(track, true);
+            }
+            if (isStale()) return;
+            if (!url) {
+                onPlaybackFailed(track, plIndex, tIndex, autoNext, token);
+                return;
+            }
 
-        playlists[plIndex].tracks[tIndex].url = url;
-        track = playlists[plIndex].tracks[tIndex];
-        delete track._unplayable;
-        state.recentPlayback.push({
-            plIndex,
-            tIndex,
-            artistKey: primaryArtistKey(track.artist)
-        });
-        if (state.recentPlayback.length > 12) {
-            state.recentPlayback = state.recentPlayback.slice(-12);
-        }
+            playlists[plIndex].tracks[tIndex].url = url;
+            track = playlists[plIndex].tracks[tIndex];
+            delete track._unplayable;
+            state.recentPlayback.push({
+                plIndex,
+                tIndex,
+                artistKey: primaryArtistKey(track.artist)
+            });
+            if (state.recentPlayback.length > 12) {
+                state.recentPlayback = state.recentPlayback.slice(-12);
+            }
 
-        try {
-            if (audioCtx.state === 'suspended') await audioCtx.resume();
-        } catch (e) {
-            console.warn('AudioContext resume failed', e);
-        }
+            try {
+                if (audioCtx.state === 'suspended') await audioCtx.resume();
+            } catch (e) {
+                console.warn('AudioContext resume failed', e);
+            }
 
-        // Immediate, reliable switch.
-        audio.pause();
-        audio.currentTime = 0;
-        audio.src = url;
-        audio.preload = 'auto';
-        audio.playbackRate = state.playbackSpeed;
-        if (!state.isMuted) {
-            currentSource.gain.gain.setValueAtTime(state.volume, audioCtx.currentTime);
-        }
+            audio.pause();
+            audio.currentTime = 0;
+            audio.src = url;
+            audio.load();
+            audio.preload = 'auto';
+            audio.playbackRate = state.playbackSpeed;
+            audio.muted = state.isMuted;
+            setMasterVolume(state.isMuted ? 0 : state.volume);
+            if (currentSource.gain) {
+                currentSource.gain.gain.setValueAtTime(state.isMuted ? 0 : state.volume, audioCtx.currentTime);
+            }
 
-        try {
-            await audio.play();
-        } catch (e) {
-            console.warn('Play blocked:', e);
-        }
-        if (token !== playRequestToken) return;
+            let playStarted = false;
+            try {
+                await audio.play();
+                playStarted = true;
+            } catch (e) {
+                console.warn('Play blocked:', e);
+            }
+            if (isStale()) return;
 
-        let ok = await waitForPlaybackReady(6000);
-        if (token !== playRequestToken) return;
-        if (!ok) {
-            const retryUrl = await resolveTrackStreamSafe(track, true);
-            if (token !== playRequestToken) return;
-            if (retryUrl && retryUrl !== url) {
-                playlists[plIndex].tracks[tIndex].url = retryUrl;
-                audio.pause();
-                audio.currentTime = 0;
-                audio.src = retryUrl;
-                try {
-                    await audio.play();
-                    ok = await waitForPlaybackReady(5000);
-                } catch (e2) {
-                    console.warn('Retry play failed:', e2);
-                    ok = false;
+            if (playStarted || isAudioReadyToPlay()) {
+                state.isBuffering = false;
+                state.isPlaying = !audio.paused;
+                updatePlayerUI();
+            }
+
+            let ok = isAudioReadyToPlay();
+            if (!ok && playStarted) {
+                ok = await waitForPlaybackReady(3500);
+            }
+            if (isStale()) return;
+
+            if (!ok) {
+                const retryUrl = await resolveTrackStreamSafe(track, true);
+                if (isStale()) return;
+                if (retryUrl && retryUrl !== url) {
+                    playlists[plIndex].tracks[tIndex].url = retryUrl;
+                    audio.pause();
+                    audio.currentTime = 0;
+                    audio.src = retryUrl;
+                    audio.load();
+                    try {
+                        await audio.play();
+                        ok = await waitForPlaybackReady(3500);
+                    } catch (e2) {
+                        console.warn('Retry play failed:', e2);
+                        ok = false;
+                    }
                 }
             }
-        }
 
-        if (token !== playRequestToken) return;
-        if (!ok) {
-            onPlaybackFailed(track, plIndex, tIndex, autoNext, token);
-            return;
-        }
+            if (isStale()) return;
+            if (!ok) {
+                onPlaybackFailed(track, plIndex, tIndex, autoNext, token);
+                return;
+            }
 
-        autoSkipAttempts = 0;
-        state.isBuffering = false;
-        state.isPlaying = true;
-        updatePlayerUI();
-        updateMediaSession(track);
-        document.body.classList.add('player-expanded');
-        window.dispatchEvent(new CustomEvent('palmplay:trackchange', { detail: { plIndex, tIndex } }));
-        recordPlayHistory(track);
-        applyDynamicTheme(track.art);
-        prefetchUpcomingTrack(plIndex, tIndex);
+            autoSkipAttempts = 0;
+            state.isBuffering = false;
+            state.isPlaying = true;
+            updatePlayerUI();
+            updateMediaSession(track);
+            document.body.classList.add('player-expanded');
+            window.dispatchEvent(new CustomEvent('palmplay:trackchange', { detail: { plIndex, tIndex } }));
+            recordPlayHistory(track);
+            applyDynamicTheme(track.art);
+            prefetchUpcomingTrack(plIndex, tIndex);
 
-        if (state.currentView === 'playlist') {
-            const plMainPlayIcon = document.querySelector('#pl-main-play i');
-            if (plMainPlayIcon) plMainPlayIcon.className = 'fas fa-pause';
-            document.querySelectorAll('.track-row').forEach((row, idx) => {
-                row.classList.toggle('active', idx === tIndex);
-            });
+            if (state.currentView === 'playlist') {
+                const plMainPlayIcon = document.querySelector('#pl-main-play i');
+                if (plMainPlayIcon) plMainPlayIcon.className = 'fas fa-pause';
+                document.querySelectorAll('.track-row').forEach((row, idx) => {
+                    row.classList.toggle('active', idx === tIndex);
+                });
+            }
+        } catch (err) {
+            console.error('playTrack failed', err);
+            if (!isStale()) {
+                state.isBuffering = false;
+                state.isPlaying = false;
+                updatePlayerUI();
+                const failedTrack = playlists[plIndex]?.tracks?.[tIndex];
+                if (failedTrack) onPlaybackFailed(failedTrack, plIndex, tIndex, autoNext, token);
+            }
         }
     }
 
@@ -4685,6 +4738,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const pos = (e.clientX - rect.left) / rect.width;
         state.volume = Math.max(0, Math.min(1, pos));
         audio.volume = state.volume;
+        setMasterVolume(state.isMuted ? 0 : state.volume);
+        if (currentSource.gain) {
+            currentSource.gain.gain.setValueAtTime(state.isMuted ? 0 : state.volume, audioCtx.currentTime);
+        }
         volumeFill.style.width = `${state.volume * 100}%`;
     }
 
