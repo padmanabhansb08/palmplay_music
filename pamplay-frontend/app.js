@@ -4467,6 +4467,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         state.currentPlaylistIndex = plIndex;
         state.currentTrackIndex = tIndex;
+        
+        // Stop current audio immediately so old track doesn't play while new one resolves
+        audio.pause();
+
         ensureQueueForCurrentTrack(plIndex, tIndex, {
             forceReset: !autoNext && !fromQueue,
             keepExisting: autoNext || fromQueue
