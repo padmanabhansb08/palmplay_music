@@ -742,7 +742,7 @@ body.player-bar-hidden .player-bar {
 
 .track-info .control-btn {
     flex-shrink: 0;
-    color: var(--m3-on-surface-variant);
+    color: rgba(255, 255, 255, 0.8);
     transition: var(--transition-fast);
     width: 26px;
     height: 26px;
@@ -752,7 +752,7 @@ body.player-bar-hidden .player-bar {
 }
 
 .track-info .control-btn:hover {
-    color: var(--m3-on-surface);
+    color: #ffffff;
     transform: scale(1.05);
     background: rgba(255, 255, 255, 0.14);
 }
@@ -775,17 +775,18 @@ body.player-bar-hidden .player-bar {
 
 .track-name {
     font-weight: 700;
-    font-size: 12px;
+    font-size: 13px;
     margin-bottom: 1px;
-    color: var(--m3-on-surface);
+    color: #ffffff;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .artist-name {
-    font-size: 10px;
-    color: var(--m3-on-surface-variant);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -809,7 +810,7 @@ body.player-bar-hidden .player-bar {
     display: flex;
     align-items: center;
     gap: 22px;
-    color: var(--m3-on-surface-variant);
+    color: rgba(255, 255, 255, 0.8);
 }
 
 .control-buttons i {
@@ -821,14 +822,15 @@ body.player-bar-hidden .player-bar {
 }
 
 .control-buttons i:hover {
-    color: var(--m3-on-surface);
+    color: #ffffff;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
 }
 
 .play-pause-btn {
-    width: 36px;
-    height: 36px;
-    background: var(--m3-primary);
-    color: var(--m3-on-primary);
+    width: 38px;
+    height: 38px;
+    background: #ffffff;
+    color: #000000;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -858,7 +860,7 @@ body.player-bar-hidden .player-bar {
 
 .progress-time {
     font-size: 11px;
-    color: var(--m3-on-surface-variant);
+    color: rgba(255, 255, 255, 0.7);
     pointer-events: none;
 }
 
@@ -874,15 +876,15 @@ body.player-bar-hidden .player-bar {
 
 .progress-fill {
     height: 100%;
-    background: var(--m3-primary);
+    background: #ffffff;
     border-radius: 999px;
     width: 0%;
     position: relative;
-    box-shadow: 0 0 10px color-mix(in srgb, var(--m3-primary) 60%, transparent);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.6);
 }
 
 .progress-bar:hover .progress-fill {
-    background: var(--m3-primary);
+    background: #ffffff;
 }
 
 .progress-fill::after {
@@ -909,7 +911,7 @@ body.player-bar-hidden .player-bar {
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
-    color: var(--m3-on-surface-variant);
+    color: rgba(255, 255, 255, 0.8);
     min-width: 0;
 }
 
@@ -923,16 +925,16 @@ body.player-bar-hidden .player-bar {
 
 .volume-fill {
     height: 100%;
-    background: var(--m3-primary);
+    background: #ffffff;
     border-radius: 999px;
     width: 70%;
-    box-shadow: 0 0 10px color-mix(in srgb, var(--m3-primary) 60%, transparent);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.6);
 }
 
 .speed-toggle {
     font-size: 12px;
     font-weight: 700;
-    color: var(--m3-on-surface-variant);
+    color: rgba(255, 255, 255, 0.8);
     cursor: pointer;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.14);
