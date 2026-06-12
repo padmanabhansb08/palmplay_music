@@ -4567,13 +4567,11 @@ document.addEventListener('DOMContentLoaded', () => {
             audio.pause();
             state.isPlaying = false;
         } else {
-            // If the audio source is broken (e.g. 403 Forbidden on expired URL), refresh it
+            // Check if audio error is already set
             if (audio.error && state.currentPlaylistIndex >= 0) {
-                console.warn('Audio source broken in togglePlay, attempting to recover...');
                 const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
                 if (track) {
                     showToast('Refreshing audio stream...', 'fa-sync fa-spin');
-                    // Force the stream resolver to fetch a fresh URL
                     track._unplayable = true;
                     playTrack(state.currentPlaylistIndex, state.currentTrackIndex);
                     return;
@@ -4585,6 +4583,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.isPlaying = true;
             } catch (e) {
                 console.warn('Resume play failed:', e);
+                
+                // If it's a NotSupportedError, the stream is dead. Refresh it!
+                if (e.name === 'NotSupportedError' && state.currentPlaylistIndex >= 0) {
+                    const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+                    if (track) {
+                        showToast('Refreshing audio stream...', 'fa-sync fa-spin');
+                        track._unplayable = true;
+                        playTrack(state.currentPlaylistIndex, state.currentTrackIndex);
+                        return;
+                    }
+                }
+                
                 showToast('Playback blocked. Tap play again.', 'fa-play');
                 state.isPlaying = false;
             }
