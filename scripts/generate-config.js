@@ -17,9 +17,6 @@ const catalogOut = path.join(root, 'pamplay-frontend', 'catalog-config.js');
 const supabaseOut = path.join(root, 'pamplay-frontend', 'supabase-config.js');
 
 const publicDefaults = {
-    AUDIUS_API_HOST: 'https://discoveryprovider.audius.co',
-    AUDIUS_DISCOVERY_URL: 'https://api.audius.co',
-    AUDIUS_APP_NAME: 'PalmPlay',
     DEFAULT_ART_URL: 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop',
     CATALOG_REQUESTS_PER_MINUTE: '30',
     CATALOG_MAX_CONCURRENT: '4',

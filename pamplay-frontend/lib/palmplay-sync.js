@@ -55,7 +55,6 @@
             art_url: liked.artUrl || liked.art || null,
             source: liked.source || null,
             external_id: liked.externalId ? String(liked.externalId) : null,
-            is_audius: !!liked.isAudius,
             is_catalog: !!liked.isCatalog,
             date_added: liked.dateAdded || new Date().toISOString()
         };
@@ -170,7 +169,6 @@
                 artUrl: cl.art_url,
                 source: cl.source,
                 externalId: cl.external_id,
-                isAudius: cl.is_audius,
                 isCatalog: cl.is_catalog,
                 dateAdded: cl.date_added
             });

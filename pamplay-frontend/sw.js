@@ -9,12 +9,19 @@ const PRECACHE = [
     './lib/routes.js',
     './lib/pwa.js',
     './manifest.webmanifest',
-    './assets/gallery/p1.png'
+    './assets/gallery/p1.png',
+    './app.js',
+    './palmplay-ux.js',
+    './lib/palmplay-sync.js',
+    './lib/palmplay-auth.js',
+    './lib/curated-trending.js',
+    './env-config.js',
+    './catalog-config.js',
+    './supabase-config.js'
 ];
 
 function isAudioOrApi(url) {
     if (url.pathname.includes('/api/')) return true;
-    if (url.hostname.includes('audius')) return true;
     if (url.hostname.includes('saavn') || url.hostname.includes('sumit')) return true;
     if (url.pathname.includes('/stream')) return true;
     if (url.searchParams.has('app_name') && url.pathname.includes('/v1/')) return true;

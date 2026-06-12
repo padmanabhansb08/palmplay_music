@@ -37,7 +37,6 @@ create table if not exists public.user_liked_songs (
   art_url text,
   source text,
   external_id text,
-  is_audius boolean default false,
   is_catalog boolean default false,
   date_added timestamptz not null default now(),
   unique (user_id, track_name, artist)

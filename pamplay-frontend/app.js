@@ -2,88 +2,9 @@
 // API config (public: env-config.js; catalog URL: gitignored catalog-config.js only)
 const _env = (typeof window !== 'undefined' && window.PALMPLAY_ENV) ? window.PALMPLAY_ENV : {};
 const _catalog = (typeof window !== 'undefined' && window.PALMPLAY_CATALOG) ? window.PALMPLAY_CATALOG : {};
-const AUDIUS_HOST = (_env.AUDIUS_API_HOST || 'https://discoveryprovider.audius.co').replace(/\/$/, '');
-const AUDIUS_DISCOVERY_URL = _env.AUDIUS_DISCOVERY_URL || 'https://api.audius.co';
-const AUDIUS_APP_NAME = _env.AUDIUS_APP_NAME || 'PalmPlay';
 const MUSIC_CATALOG_API_BASE = (_catalog.apiBase || '').trim().replace(/\/$/, '');
 const DEFAULT_ART_URL = _env.DEFAULT_ART_URL || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
 const SPOTIFY_CLIENT_ID = (_env.SPOTIFY_CLIENT_ID || 'c6177a0758d04a8582e59cd86bd18fbf').trim();
-// Temporary kill switch: keep primary catalog during traffic spikes.
-const DISABLE_AUDIUS_TRAFFIC_FALLBACK = String(_env.DISABLE_AUDIUS_TRAFFIC_FALLBACK ?? '1') === '1';
-
-const TRAFFIC_LIMITS = {
-    requestsPerMinute: Math.max(5, parseInt(_env.CATALOG_REQUESTS_PER_MINUTE, 10) || 30),
-    maxConcurrent: Math.max(1, parseInt(_env.CATALOG_MAX_CONCURRENT, 10) || 4),
-    fallbackMinutes: Math.max(1, parseInt(_env.CATALOG_FALLBACK_MINUTES, 10) || 15),
-};
-
-/** Switches catalog API → Audius when request rate or concurrency is high (friends-scale protection). */
-const catalogTraffic = {
-    inFlight: 0,
-    _storageKey: 'palmplay_catalog_traffic',
-
-    _load() {
-        try {
-            return JSON.parse(sessionStorage.getItem(this._storageKey) || '{}');
-        } catch {
-            return {};
-        }
-    },
-
-    _save(s) {
-        try {
-            sessionStorage.setItem(this._storageKey, JSON.stringify(s));
-        } catch (_) {}
-    },
-
-    _rollWindow(s, now) {
-        if (!s.windowStart || now - s.windowStart > 60000) {
-            return { count: 0, windowStart: now, fallbackUntil: s.fallbackUntil || 0 };
-        }
-        return s;
-    },
-
-    isAudiusFallbackActive() {
-        const now = Date.now();
-        const s = this._load();
-        if (s.fallbackUntil && now < s.fallbackUntil) return true;
-        if (this.inFlight >= TRAFFIC_LIMITS.maxConcurrent) return true;
-        const rolled = this._rollWindow(s, now);
-        return rolled.count >= TRAFFIC_LIMITS.requestsPerMinute;
-    },
-
-    _enterFallback(now) {
-        const s = this._rollWindow(this._load(), now);
-        s.fallbackUntil = now + TRAFFIC_LIMITS.fallbackMinutes * 60 * 1000;
-        this._save(s);
-        if (!sessionStorage.getItem('palmplay_fallback_toast')) {
-            sessionStorage.setItem('palmplay_fallback_toast', '1');
-            if (typeof showToast === 'function') {
-                showToast('High demand — showing alternate picks for now', 'fa-bolt');
-            }
-        }
-    },
-
-    recordStart() {
-        const now = Date.now();
-        let s = this._rollWindow(this._load(), now);
-        s.count = (s.count || 0) + 1;
-        this.inFlight++;
-        if (s.count >= TRAFFIC_LIMITS.requestsPerMinute || this.inFlight > TRAFFIC_LIMITS.maxConcurrent) {
-            this._enterFallback(now);
-        }
-        this._save(s);
-    },
-
-    recordEnd() {
-        this.inFlight = Math.max(0, this.inFlight - 1);
-    },
-
-    shouldUseAudius() {
-        if (DISABLE_AUDIUS_TRAFFIC_FALLBACK) return false;
-        return this.isAudiusFallbackActive();
-    }
-};
 
 // Local Music Database & State
 let playlists = []; // Array of { name: string, tracks: [] }
@@ -563,6 +484,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 await db.tracks.where('playlistId').equals(pl.id).delete();
                 await db.playlists.delete(pl.id);
 
+                if (state.currentPlaylistIndex === index) {
+                    audio.pause();
+                    state.isPlaying = false;
+                    state.currentPlaylistIndex = -1;
+                    state.currentTrackIndex = -1;
+                } else if (state.currentPlaylistIndex > index) {
+                    state.currentPlaylistIndex--;
+                }
+                
+                state.recentPlayback = state.recentPlayback
+                    .filter(r => r.plIndex !== index)
+                    .map(r => {
+                        if (r.plIndex > index) r.plIndex--;
+                        return r;
+                    });
+                saveState();
+
                 playlists.splice(index, 1);
                 showToast(`Deleted "${pl.name}"`, 'fa-trash');
                 renderSidebar();
@@ -657,20 +595,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!pl?.tracks?.length) return [];
             const current = state.currentTrackIndex;
             ensureQueueForCurrentTrack(state.currentPlaylistIndex, current, { keepExisting: true });
-            const indices = (state.queueIndices?.length ? state.queueIndices : buildDefaultQueueIndices(state.currentPlaylistIndex, current))
-                .filter((ti) => ti >= current && ti < pl.tracks.length);
-            return indices.map((ti, pos) => {
-                const t = pl.tracks[ti];
-                return ({
-                plIndex: state.currentPlaylistIndex,
-                qPos: pos,
-                tIndex: ti,
-                name: t.name,
-                artist: t.artist,
-                art: t.art || DEFAULT_ART_URL,
-                isCurrent: pos === 0
-                });
-            });
+            let sourceIndices = state.queueIndices?.length ? state.queueIndices : buildDefaultQueueIndices(state.currentPlaylistIndex, current);
+            const pos = sourceIndices.indexOf(current);
+            const results = [];
+            for (let i = Math.max(0, pos); i < sourceIndices.length; i++) {
+                const ti = sourceIndices[i];
+                if (ti >= 0 && ti < pl.tracks.length) {
+                    const t = pl.tracks[ti];
+                    results.push({
+                        plIndex: state.currentPlaylistIndex,
+                        qPos: i,
+                        tIndex: ti,
+                        name: t.name,
+                        artist: t.artist,
+                        art: t.art || DEFAULT_ART_URL,
+                        isCurrent: results.length === 0
+                    });
+                }
+            }
+            return results;
         },
         playAt(plIndex, tIndex) {
             if (plIndex !== state.currentPlaylistIndex) {
@@ -687,7 +630,8 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         removeAt(queuePos) {
             if (state.currentPlaylistIndex < 0) return false;
-            if (queuePos <= 0) return false; // don't remove currently playing item
+            const currentPos = state.queueIndices.indexOf(state.currentTrackIndex);
+            if (queuePos <= currentPos || queuePos < 0) return false; // don't remove currently playing item or history
             const next = state.queueIndices.filter((_, i) => i !== queuePos);
             setQueueIndices(state.currentPlaylistIndex, state.currentTrackIndex, next, true);
             return true;
@@ -699,7 +643,8 @@ document.addEventListener('DOMContentLoaded', () => {
         reorder(fromPos, toPos) {
             if (state.currentPlaylistIndex < 0) return false;
             const len = state.queueIndices.length;
-            if (fromPos <= 0 || toPos <= 0 || fromPos >= len || toPos >= len) return false;
+            const currentPos = state.queueIndices.indexOf(state.currentTrackIndex);
+            if (fromPos <= currentPos || toPos <= currentPos || fromPos >= len || toPos >= len) return false;
             const copy = state.queueIndices.slice();
             const [moved] = copy.splice(fromPos, 1);
             copy.splice(toPos, 0, moved);
@@ -747,6 +692,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const offset = details?.seekOffset ?? 10;
             audio.currentTime = Math.min(audio.duration, audio.currentTime + offset);
         });
+        safeHandler('seekto', (details) => {
+            if (!audio.src || !audio.duration) return;
+            audio.currentTime = details.seekTime || 0;
+        });
     }
 
     function updateMediaSession(track) {
@@ -762,7 +711,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const art = track.art || DEFAULT_ART_URL;
         const artwork = [];
-        if (art && !art.startsWith('data:')) {
+        if (art) {
             artwork.push({ src: art, sizes: '96x96', type: 'image/png' });
             artwork.push({ src: art, sizes: '256x256', type: 'image/png' });
             artwork.push({ src: art, sizes: '512x512', type: 'image/png' });
@@ -863,9 +812,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (t.audioBlob) {
                         url = URL.createObjectURL(t.audioBlob);
                         art = t.artBlob ? URL.createObjectURL(t.artBlob) : DEFAULT_ART_URL;
-                    } else if (t.streamUrl) {
-                        url = t.streamUrl;
-                        art = t.artUrl || DEFAULT_ART_URL;
+                    } else if (t.url || t.streamUrl) {
+                        // It's a saved string URL. If it's catalog, don't use it, let it fetch fresh.
+                        if (t.source === 'catalog') {
+                            url = null;
+                        } else {
+                            url = t.url || t.streamUrl;
+                        }
+                        art = t.art || t.artUrl || DEFAULT_ART_URL;
                     } else {
                         continue;
                     }
@@ -881,9 +835,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         url,
                         duration,
                         art,
-                        isCatalog: t.source === 'catalog',
-                        isAudius: t.source === 'audius',
-                        isCatalogFallback: t.source === 'audius'
+                        isCatalog: t.source === 'catalog'
                     });
                 }
 
@@ -904,33 +856,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }));
                 ensureLikedSongsPlaylist();
 
-                // Inject Audius liked tracks into temporary playlist so they can be played
-                const audiusLiked = likedSongs.filter(ls => ls.isAudius);
-                if (audiusLiked.length > 0) {
-                    let audiusPlIndex = playlists.findIndex(pl => pl.id === 'audius_search');
-                    if (audiusPlIndex === -1) {
-                        playlists.push({
-                            id: 'audius_search',
-                            name: 'Search Results',
-                            tracks: [],
-                            isTemporary: true
-                        });
-                        audiusPlIndex = playlists.length - 1;
-                    }
-                    audiusLiked.forEach(ls => {
-                        if (!playlists[audiusPlIndex].tracks.find(t => t.name === ls.trackName && t.artist === ls.artist)) {
-                            playlists[audiusPlIndex].tracks.push({
-                                name: ls.trackName,
-                                artist: ls.artist,
-                                album: ls.album,
-                                duration: ls.duration,
-                                url: ls.url,
-                                art: ls.art,
-                                isAudius: true
-                            });
-                        }
-                    });
-                }
+
             } catch (likedErr) {
                 console.log('Liked songs table not ready yet:', likedErr);
                 likedSongs = [];
@@ -1015,14 +941,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'ArrowUp': // ↑ = Volume up
                     e.preventDefault();
                     state.volume = Math.min(1, state.volume + 0.1);
-                    audio.volume = state.volume;
+                    audio.volume = state.isMuted ? 0 : state.volume;
+                    setMasterVolume(state.isMuted ? 0 : state.volume);
                     document.querySelector('.volume-fill').style.width = `${state.volume * 100}%`;
                     showToast(`Volume: ${Math.round(state.volume * 100)}%`, 'fa-volume-up');
                     break;
                 case 'ArrowDown': // ↓ = Volume down
                     e.preventDefault();
                     state.volume = Math.max(0, state.volume - 0.1);
-                    audio.volume = state.volume;
+                    audio.volume = state.isMuted ? 0 : state.volume;
+                    setMasterVolume(state.isMuted ? 0 : state.volume);
                     document.querySelector('.volume-fill').style.width = `${state.volume * 100}%`;
                     showToast(`Volume: ${Math.round(state.volume * 100)}%`, 'fa-volume-down');
                     break;
@@ -1030,8 +958,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     e.preventDefault();
                     state.isMuted = !state.isMuted;
                     audio.muted = state.isMuted;
+                    audio.volume = state.isMuted ? 0 : state.volume;
+                    setMasterVolume(state.isMuted ? 0 : state.volume);
                     const muteIcon = document.getElementById('mute-btn');
-                    if (muteIcon) muteIcon.className = state.isMuted ? 'fas fa-volume-mute' : 'fas fa-volume-up';
+                    if (muteIcon) {
+                        muteIcon.className = state.isMuted ? 'fas fa-volume-mute' : 'fas fa-volume-up';
+                        muteIcon.style.color = state.isMuted ? 'var(--primary)' : '';
+                    }
                     showToast(state.isMuted ? 'Muted' : 'Unmuted', state.isMuted ? 'fa-volume-mute' : 'fa-volume-up');
                     break;
                 case 'l': case 'L': // L = Like current track
@@ -1308,6 +1241,8 @@ document.addEventListener('DOMContentLoaded', () => {
             muteBtn.addEventListener('click', () => {
                 state.isMuted = !state.isMuted;
                 audio.muted = state.isMuted;
+                audio.volume = state.isMuted ? 0 : state.volume;
+                setMasterVolume(state.isMuted ? 0 : state.volume);
                 muteBtn.className = state.isMuted ? 'fas fa-volume-mute' : 'fas fa-volume-up';
                 muteBtn.style.color = state.isMuted ? 'var(--primary)' : '';
                 showToast(state.isMuted ? 'Muted' : 'Unmuted', state.isMuted ? 'fa-volume-mute' : 'fa-volume-up');
@@ -1321,14 +1256,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 const rect = volumeSlider.getBoundingClientRect();
                 const pos = (e.clientX - rect.left) / rect.width;
                 state.volume = Math.max(0, Math.min(1, pos));
-                audio.volume = state.volume;
                 volumeFill.style.width = `${state.volume * 100}%`;
 
                 if (state.isMuted && state.volume > 0) {
                     state.isMuted = false;
                     audio.muted = false;
-                    if (muteBtn) muteBtn.className = 'fas fa-volume-up';
+                    if (muteBtn) {
+                        muteBtn.className = 'fas fa-volume-up';
+                        muteBtn.style.color = '';
+                    }
                 }
+                
+                audio.volume = state.isMuted ? 0 : state.volume;
+                setMasterVolume(state.isMuted ? 0 : state.volume);
             });
         }
 
@@ -1382,10 +1322,15 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         audio.onerror = () => {
-            if (state.isBuffering) {
-                state.isBuffering = false;
-                state.isPlaying = false;
-                updatePlayerUI();
+            state.isBuffering = false;
+            state.isPlaying = false;
+            updatePlayerUI();
+            
+            if (state.currentPlaylistIndex !== -1) {
+                const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+                if (track) {
+                    onPlaybackFailed(track, state.currentPlaylistIndex, state.currentTrackIndex, true, playRequestToken);
+                }
             }
         };
 
@@ -1439,10 +1384,17 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast(`Adding folder "${folderName}"...`, 'fa-folder-plus');
 
         // Save to DB first to get a playlist ID
-        const plId = await db.playlists.add({
-            name: folderName,
-            userId: uid
-        });
+        let plId;
+        const existingPls = await db.playlists.where('userId').equals(uid).toArray();
+        const existing = existingPls.find(p => p.name === folderName);
+        if (existing) {
+            plId = existing.id;
+        } else {
+            plId = await db.playlists.add({
+                name: folderName,
+                userId: uid
+            });
+        }
 
         // Use a loading overlay if possible, or just log
         console.log('Extracting metadata and saving to DB...');
@@ -1482,13 +1434,16 @@ document.addEventListener('DOMContentLoaded', () => {
             newTracks.push(track);
         }
 
-        const newPlaylist = {
-            id: plId,
-            name: folderName,
-            tracks: newTracks
-        };
-
-        playlists.push(newPlaylist);
+        const memPl = playlists.find(p => p.id === plId);
+        if (memPl) {
+            memPl.tracks.push(...newTracks);
+        } else {
+            playlists.push({
+                id: plId,
+                name: folderName,
+                tracks: newTracks
+            });
+        }
         renderSidebar();
         renderHome();
 
@@ -1674,7 +1629,7 @@ document.addEventListener('DOMContentLoaded', () => {
         source.forEach((idx) => {
             const n = Number(idx);
             if (!Number.isInteger(n)) return;
-            if (n < currentIndex || n >= pl.tracks.length) return;
+            if (n < 0 || n >= pl.tracks.length) return;
             if (seen.has(n)) return;
             seen.add(n);
             valid.push(n);
@@ -1708,8 +1663,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!state.queueIndices.includes(currentIndex)) {
             setQueueIndices(plIndex, currentIndex, null, false);
         } else {
-            const pos = state.queueIndices.indexOf(currentIndex);
-            setQueueIndices(plIndex, currentIndex, state.queueIndices.slice(pos), state.queueExplicit);
+            setQueueIndices(plIndex, currentIndex, state.queueIndices, state.queueExplicit);
         }
     }
 
@@ -2142,14 +2096,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!track) return null;
         if (!forceRefresh && track.url && !track._unplayable) return track.url;
 
-        if (track.isCatalog && track.id) {
-            const fresh = await fetchCatalogSongById(track.id);
+        const catalogId = track.externalId || (typeof track.id === 'string' ? track.id : null);
+        if (track.isCatalog && catalogId) {
+            const fresh = await fetchCatalogSongById(catalogId);
             if (fresh?.url) return fresh.url;
         }
 
-        if ((track.isAudius || track.isCatalogFallback) && track.id) {
-            return `${AUDIUS_HOST}/v1/tracks/${track.id}/stream?app_name=${AUDIUS_APP_NAME}`;
-        }
+
 
         const results = await fetchCatalogTracks(`${track.name} ${track.artist}`, 6);
         const match = results.find(r =>
@@ -2268,10 +2221,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (playId) {
             let track = await fetchCatalogSongById(playId);
-            if (!track) {
-                const audius = await fetchAudiusCatalogFallback(playId, 1);
-                track = audius[0] || null;
-            }
             if (track) {
                 const idx = upsertTempPlaylist('deeplink', 'Shared track', [track]);
                 await playTrack(idx, 0);
@@ -2281,7 +2230,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (q) {
             const decoded = decodeURIComponent(q);
             if (!ppRoutes().isExplorePage()) {
-                window.location.href = `${ppRoutes().page('discover')}?q=${encodeURIComponent(decoded)}`;
+                const redirectUrl = new URL(ppRoutes().page('discover'), window.location.origin);
+                redirectUrl.searchParams.set('q', decoded);
+                window.location.href = redirectUrl.toString();
                 return;
             }
             window.PalmPlayNav?.go('search');
@@ -2354,9 +2305,7 @@ document.addEventListener('DOMContentLoaded', () => {
             duration: track.duration || 0,
             url: track.url,
             art: track.art || DEFAULT_ART_URL,
-            isAudius: !!track.isAudius,
-            isCatalog: !!track.isCatalog,
-            isCatalogFallback: !!track.isCatalogFallback
+            isCatalog: !!track.isCatalog
         };
         let hist = getPlayHistory().filter(h => !(h.name === entry.name && h.artist === entry.artist));
         hist.unshift(entry);
@@ -2610,7 +2559,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cached?.length) return cached.slice(0, limit);
 
         const list = (window.PALMPLAY_CURATED_TRENDING || []).slice(0, limit);
-        if (!list.length) return fetchAudiusCatalogFallback('trending', limit);
+        if (!list.length) return [];
 
         const resolved = [];
         const batchSize = 8;
@@ -2621,7 +2570,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     const q = `${item.name} ${item.artist}`;
                     try {
                         let tracks = await fetchCatalogTracks(q, 8);
-                        if (!tracks.length) tracks = await fetchAudiusCatalogFallback(q, 8);
                         let picked = pickCuratedMatch(tracks, item);
                         if (!picked || picked.score < 0.62) {
                             const retryTracks = await fetchCatalogTracks(item.name, 8);
@@ -2647,7 +2595,7 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             resolved.push(...chunk.filter(Boolean));
         }
-        const finalTracks = resolved.length ? resolved : await fetchAudiusCatalogFallback('trending', limit);
+        const finalTracks = resolved.length ? resolved : [];
         if (finalTracks?.length) setCachedCuratedTracks(finalTracks);
         return finalTracks;
     }
@@ -2731,16 +2679,13 @@ document.addEventListener('DOMContentLoaded', () => {
             duration: track.duration || 0,
             url: track.url || track.streamUrl || null,
             art: track.art || track.artUrl || DEFAULT_ART_URL,
-            isCatalog: !!(track.isCatalog || track.source === 'catalog'),
-            isAudius: !!(track.isAudius || track.source === 'audius'),
-            isCatalogFallback: !!track.isCatalogFallback
+            isCatalog: !!(track.isCatalog || track.source === 'catalog')
         };
     }
 
     function getTrackSource(track) {
         if (track.audioBlob) return 'local';
         if (track.isCatalog || track.source === 'catalog') return 'catalog';
-        if (track.isAudius || track.source === 'audius') return 'audius';
         return 'stream';
     }
 
@@ -3578,7 +3523,6 @@ document.addEventListener('DOMContentLoaded', () => {
     async function resolveImportedTrack(entry) {
         const query = `${entry.name} ${entry.artist || ''}`.trim();
         let tracks = await fetchCatalogTracks(query, 6);
-        if (!tracks.length) tracks = await fetchAudiusCatalogFallback(query, 8);
         if (!tracks.length) return null;
 
         const picked = pickCuratedMatch(tracks, {
@@ -3910,7 +3854,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function createTrackCard(track, plIndex, tIdx, options = {}) {
         const card = document.createElement('div');
-        card.className = 'card audius-card';
+        card.className = 'card catalog-card';
         const art = track.art || DEFAULT_ART_URL;
         card.innerHTML = `
             <div class="card-image" style="background-image: url('${escapeHtml(art)}')">
@@ -4099,8 +4043,7 @@ document.addEventListener('DOMContentLoaded', () => {
             album: ls.album,
             duration: ls.duration,
             url: ls.url,
-            art: ls.art || DEFAULT_ART_URL,
-            isAudius: ls.isAudius
+            art: ls.art || DEFAULT_ART_URL
         })).filter(t => t.url);
 
         if (!preview.length) return;
@@ -4275,51 +4218,32 @@ document.addEventListener('DOMContentLoaded', () => {
         cardGrid.style.display = 'grid';
         
         try {
-            let url = '';
-            if (category === 'Trending') {
-                url = `${AUDIUS_HOST}/v1/tracks/trending?app_name=${AUDIUS_APP_NAME}&limit=20`;
-            } else {
-                url = `${AUDIUS_HOST}/v1/tracks/search?query=${encodeURIComponent(category)}&app_name=${AUDIUS_APP_NAME}`;
-            }
-            
-            const res = await fetch(url);
-            const data = await res.json();
-            const audiusTracks = data.data || [];
+            const query = category === 'Trending' ? 'latest hits' : category;
+            const catalogTracks = await fetchCatalogTracks(query, 20);
             
             cardGrid.innerHTML = '';
             
-            if (audiusTracks.length === 0) {
+            if (catalogTracks.length === 0) {
                 cardGrid.innerHTML = '<div style="grid-column: 1/-1; color:var(--text-subdued); padding:20px;">No tracks found for this category.</div>';
                 return;
             }
             
-            // Create or update temporary Audius playlist for playback
-            let audiusPlIndex = playlists.findIndex(pl => pl.id === 'audius_explore');
-            if (audiusPlIndex === -1) {
-                audiusPlIndex = playlists.length;
+            // Create or update temporary playlist for playback
+            let explorePlIndex = playlists.findIndex(pl => pl.id === 'catalog_explore');
+            if (explorePlIndex === -1) {
+                explorePlIndex = playlists.length;
                 playlists.push({
-                    id: 'audius_explore',
+                    id: 'catalog_explore',
                     name: 'Explore Mix',
                     tracks: [],
                     isTemporary: true
                 });
             }
             
-            const mappedTracks = audiusTracks.map(t => ({
-                id: t.id,
-                name: t.title,
-                artist: t.user?.name || 'Unknown',
-                album: 'Explore',
-                duration: t.duration,
-                url: `${AUDIUS_HOST}/v1/tracks/${t.id}/stream?app_name=${AUDIUS_APP_NAME}`,
-                art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || DEFAULT_ART_URL,
-                isAudius: true
-            }));
+            playlists[explorePlIndex].tracks = catalogTracks;
             
-            playlists[audiusPlIndex].tracks = mappedTracks;
-            
-            mappedTracks.forEach((track, tIdx) => {
-                cardGrid.appendChild(createTrackCard(track, audiusPlIndex, tIdx));
+            catalogTracks.forEach((track, tIdx) => {
+                cardGrid.appendChild(createTrackCard(track, explorePlIndex, tIdx));
             });
             
         } catch (err) {
@@ -4659,9 +4583,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const queuePos = state.queueIndices.indexOf(state.currentTrackIndex);
         if (queuePos >= 0 && queuePos < state.queueIndices.length - 1) {
-            const nextIndex = state.queueIndices[queuePos + 1];
-            playTrack(state.currentPlaylistIndex, nextIndex, { autoNext: true, fromQueue: true });
-            return;
+            if (state.queueExplicit || !state.isShuffle) {
+                const nextIndex = state.queueIndices[queuePos + 1];
+                playTrack(state.currentPlaylistIndex, nextIndex, { autoNext: true, fromQueue: true });
+                return;
+            }
         }
 
         if (state.queueExplicit) {
@@ -4691,7 +4617,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (pick) state.currentTrackIndex = pick.idx;
         } else {
             if (state.currentTrackIndex >= pl.tracks.length - 1) {
-                if (!allowWrap) {
+                if (!allowWrap && !state.isShuffle) {
                     state.isPlaying = false;
                     updatePlayerUI();
                     return;
@@ -4718,9 +4644,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ensureQueueForCurrentTrack(state.currentPlaylistIndex, state.currentTrackIndex, { keepExisting: true });
         const queuePos = state.queueIndices.indexOf(state.currentTrackIndex);
         if (queuePos > 0) {
-            const prevIndex = state.queueIndices[queuePos - 1];
-            playTrack(state.currentPlaylistIndex, prevIndex);
-            return;
+            if (state.queueExplicit || !state.isShuffle) {
+                const prevIndex = state.queueIndices[queuePos - 1];
+                playTrack(state.currentPlaylistIndex, prevIndex);
+                return;
+            }
         }
 
         const prevIndex = (state.currentTrackIndex - 1 + pl.tracks.length) % pl.tracks.length;
@@ -4884,38 +4812,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return '';
     }
 
-    function mapAudiusTracksToPlaylist(items, limit) {
-        return (items || []).slice(0, limit).map(t => ({
-            id: t.id,
-            name: t.title,
-            artist: t.user?.name || 'Unknown',
-            album: 'Stream',
-            duration: parseInt(t.duration, 10) || 200,
-            language: '',
-            plays: t.play_count || 0,
-            url: `${AUDIUS_HOST}/v1/tracks/${t.id}/stream?app_name=${AUDIUS_APP_NAME}`,
-            art: t.artwork?.['480x480'] || t.artwork?.['150x150'] || DEFAULT_ART_URL,
-            isAudius: true,
-            isCatalogFallback: true
-        }));
-    }
-
-    async function fetchAudiusCatalogFallback(query, limit = 30) {
-        try {
-            const q = (query || '').trim();
-            const useTrending = /^latest\s+hits$/i.test(q) || /^trending$/i.test(q) || q.length < 2;
-            const url = useTrending
-                ? `${AUDIUS_HOST}/v1/tracks/trending?app_name=${AUDIUS_APP_NAME}&limit=${limit}`
-                : `${AUDIUS_HOST}/v1/tracks/search?query=${encodeURIComponent(q)}&app_name=${AUDIUS_APP_NAME}`;
-            const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-            const data = await res.json();
-            return mapAudiusTracksToPlaylist(data.data, limit);
-        } catch (e) {
-            console.error('Audius fallback failed:', e);
-            return [];
-        }
-    }
-
     async function fetchCatalogTracks(query, limit = 30) {
         const q = String(query || '').trim();
         if (!q) return [];
@@ -4933,21 +4829,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function fetchCatalogTracksInternal(query, limit = 30) {
-        if (catalogTraffic.shouldUseAudius()) {
-            return fetchAudiusCatalogFallback(query, limit);
-        }
         if (!MUSIC_CATALOG_API_BASE) {
-            return fetchAudiusCatalogFallback(query, limit);
+            return [];
         }
 
-        catalogTraffic.recordStart();
         try {
             const url = `${MUSIC_CATALOG_API_BASE}/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`;
             const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
             const data = await res.json();
             const results = data?.data?.results;
             if (!Array.isArray(results) || results.length === 0) {
-                return fetchAudiusCatalogFallback(query, limit);
+                return [];
             }
 
             const mapped = results.map(t => {
@@ -4980,14 +4872,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return mapped;
         } catch (e) {
             console.error('Catalog fetch failed:', e);
-            catalogTraffic._enterFallback(Date.now());
-            return fetchAudiusCatalogFallback(query, limit);
-        } finally {
-            catalogTraffic.recordEnd();
+            return [];
         }
     }
 
-    let audiusSearchTimeout = null;
+    let catalogSearchTimeout = null;
 
     function renderSearch() {
         document.body.classList.remove('lang-view-active');
@@ -5120,13 +5009,13 @@ document.addEventListener('DOMContentLoaded', () => {
         localSection.appendChild(localGrid);
         cardGrid.appendChild(localSection);
 
-        // Add container for audius search results
-        const audiusContainer = document.createElement('div');
-        audiusContainer.id = 'audius-results';
-        audiusContainer.style.marginTop = '20px';
-        audiusContainer.innerHTML = '<h3 class="browse-section-title" style="color:var(--primary);">Search Results</h3><div class="card-grid" id="audius-card-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px;"></div>';
-        audiusContainer.style.display = 'none';
-        cardGrid.appendChild(audiusContainer);
+        // Add container for catalog search results
+        const catalogContainer = document.createElement('div');
+        catalogContainer.id = 'catalog-results';
+        catalogContainer.style.marginTop = '20px';
+        catalogContainer.innerHTML = '<h3 class="browse-section-title" style="color:var(--primary);">Search Results</h3><div class="card-grid" id="catalog-card-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px;"></div>';
+        catalogContainer.style.display = 'none';
+        cardGrid.appendChild(catalogContainer);
 
         // ─── Interactive Visualizer Canvas ──────────────────────────────────────
         const canvas = document.getElementById('search-visualizer');
@@ -5209,10 +5098,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
 
-                let trendPlIndex = playlists.findIndex(pl => pl.id === 'audius_trending_search');
+                let trendPlIndex = playlists.findIndex(pl => pl.id === 'catalog_trending_search');
                 if (trendPlIndex === -1) {
                     trendPlIndex = playlists.length;
-                    playlists.push({ id: 'audius_trending_search', name: 'Trending', tracks: [], isTemporary: true });
+                    playlists.push({ id: 'catalog_trending_search', name: 'Trending', tracks: [], isTemporary: true });
                 }
 
                 playlists[trendPlIndex].tracks = tracks;
@@ -5486,7 +5375,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const localSection = document.getElementById('local-search-results');
 
             if (query.trim().length > 0) {
-                // Searching: hide hub, show local + audius
+                // Searching: hide hub, show local + catalog
                 if (hub) hub.style.display = 'none';
                 if (localSection) localSection.style.display = 'block';
             } else {
@@ -5514,46 +5403,46 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             // Debounced catalog search
-            clearTimeout(audiusSearchTimeout);
-            const audiusContainer = document.getElementById('audius-results');
-            const audiusGrid = document.getElementById('audius-card-grid');
+            clearTimeout(catalogSearchTimeout);
+            const catalogContainer = document.getElementById('catalog-results');
+            const catalogGrid = document.getElementById('catalog-card-grid');
             
             if (query.trim().length < 2) {
-                audiusContainer.style.display = 'none';
+                catalogContainer.style.display = 'none';
                 return;
             }
 
-            audiusContainer.style.display = 'block';
-            audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;"><i class="fas fa-spinner fa-spin"></i> Searching...</p>';
+            catalogContainer.style.display = 'block';
+            catalogGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;"><i class="fas fa-spinner fa-spin"></i> Searching...</p>';
 
-            audiusSearchTimeout = setTimeout(async () => {
+            catalogSearchTimeout = setTimeout(async () => {
                 try {
                     const tracks = await fetchCatalogTracks(query, 30);
                     
                     if (tracks.length === 0) {
-                        audiusGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found for "' + escapeHtml(query) + '". Try different keywords.</p>';
+                        catalogGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found for "' + escapeHtml(query) + '". Try different keywords.</p>';
                         return;
                     }
 
                     addRecentSearch(query);
 
                     // Map to internal format and render
-                    let audiusPlIndex = playlists.findIndex(pl => pl.id === 'audius_search');
-                    if (audiusPlIndex === -1) {
-                        audiusPlIndex = playlists.length;
+                    let catalogPlIndex = playlists.findIndex(pl => pl.id === 'catalog_search');
+                    if (catalogPlIndex === -1) {
+                        catalogPlIndex = playlists.length;
                         playlists.push({
-                            id: 'audius_search',
+                            id: 'catalog_search',
                             name: 'Search Results',
                             tracks: [],
                             isTemporary: true
                         });
                     }
                     
-                    playlists[audiusPlIndex].tracks = tracks;
+                    playlists[catalogPlIndex].tracks = tracks;
 
-                    audiusGrid.innerHTML = '';
+                    catalogGrid.innerHTML = '';
                     tracks.forEach((track, tIdx) => {
-                        const card = createTrackCard(track, audiusPlIndex, tIdx);
+                        const card = createTrackCard(track, catalogPlIndex, tIdx);
                         const desc = card.querySelector('.card-desc');
                         if (desc) {
                             const playsLabel = track.plays > 0
@@ -5615,8 +5504,6 @@ document.addEventListener('DOMContentLoaded', () => {
             url: ls.url || ls.streamUrl || null,
             art: ls.art || ls.artUrl || DEFAULT_ART_URL,
             isCatalog: !!ls.isCatalog,
-            isAudius: !!ls.isAudius,
-            isCatalogFallback: !!ls.isCatalogFallback,
             dateAdded: ls.dateAdded || null
         };
     }
@@ -5659,6 +5546,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error('Failed to delete liked song from DB:', e);
             }
             likedSongs.splice(existingIndex, 1);
+            
+            const likedPlIdx = playlists.findIndex(p => p.id === 'liked_songs_playback');
+            if (likedPlIdx !== -1 && state.currentPlaylistIndex === likedPlIdx) {
+                if (existingIndex < state.currentTrackIndex) {
+                    state.currentTrackIndex--;
+                } else if (existingIndex === state.currentTrackIndex) {
+                    state.currentTrackIndex = -1;
+                    audio.pause();
+                    state.isPlaying = false;
+                }
+            }
+            
             state.isLiked = false;
             showToast('Removed from Liked Songs', 'fa-heart-broken');
             window.PalmPlaySync?.removeLike?.(track.name, track.artist).catch((e) => console.warn('Cloud unlike', e));
@@ -5675,7 +5574,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 playlistId: playlists[plIndex]?.id || null,
                 trackIndex: tIndex,
                 externalId: track.id || null,
-                isAudius: track.isAudius || false,
                 isCatalog: track.isCatalog || false,
                 url: track.url || null,
                 artUrl: track.art || null
