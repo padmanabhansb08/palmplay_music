@@ -4557,10 +4557,27 @@ document.addEventListener('DOMContentLoaded', () => {
     async function togglePlay() {
         if (!audio.src) return;
         if (state.isBuffering && !state.isPlaying) return;
+        
+        // Ensure AudioContext is resumed on user gesture
+        if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+        }
+        
         if (state.isPlaying) {
             audio.pause();
             state.isPlaying = false;
         } else {
+            // If the audio source is broken (e.g. 403 Forbidden on expired URL), refresh it
+            if (audio.error && state.currentPlaylistIndex >= 0) {
+                console.warn('Audio source broken in togglePlay, attempting to recover...');
+                const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+                if (track) {
+                    showToast('Refreshing audio stream...', 'fa-sync fa-spin');
+                    playTrack(state.currentPlaylistIndex, state.currentTrackIndex);
+                    return;
+                }
+            }
+            
             try {
                 await audio.play();
                 state.isPlaying = true;
