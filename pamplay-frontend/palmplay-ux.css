@@ -1696,7 +1696,9 @@ body.now-playing-open {
         display: block !important;
     }
 
-    .progress-time {
+    /* The global .progress-row .progress-time uses display:block !important,
+       so we need the same specificity to override it on mobile */
+    .progress-row .progress-time {
         display: none !important;
     }
 
