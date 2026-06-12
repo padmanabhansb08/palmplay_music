@@ -1661,7 +1661,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (!state.queueIndices.includes(currentIndex)) {
-            setQueueIndices(plIndex, currentIndex, null, false);
+            if (state.queueExplicit && state.queueIndices.length > 0) {
+                // Do nothing, preserve the user's custom queue even if current track was removed
+            } else {
+                setQueueIndices(plIndex, currentIndex, null, false);
+            }
         } else {
             setQueueIndices(plIndex, currentIndex, state.queueIndices, state.queueExplicit);
         }
@@ -4588,6 +4592,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 playTrack(state.currentPlaylistIndex, nextIndex, { autoNext: true, fromQueue: true });
                 return;
             }
+        } else if (queuePos === -1 && state.queueExplicit && state.queueIndices.length > 0) {
+            // Current track was removed from the queue, so play the first item remaining in the custom queue
+            const nextIndex = state.queueIndices[0];
+            playTrack(state.currentPlaylistIndex, nextIndex, { autoNext: true, fromQueue: true });
+            return;
         }
 
         if (state.queueExplicit) {
@@ -5352,7 +5361,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        getSpotifyAllTimePool()
+        fetchCatalogTracks(`${lang.name} Hits`, 40)
             .then(renderLanguageMoodsFromPool)
             .catch((e) => {
                 console.warn('Language mood pool failed', e);
