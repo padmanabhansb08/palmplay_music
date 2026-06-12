@@ -2156,48 +2156,15 @@ body.player-bar-hidden .player-bar {
 @media (max-width: 768px) {
     .player-bar {
         display: flex;
-        flex-direction: row;
-        align-items: center;
         justify-content: space-between;
-        /* Force a solid, dark, frosted background on mobile regardless of dynamic theme */
-        background: rgba(10, 10, 12, 0.96) !important;
-        backdrop-filter: blur(30px) saturate(180%) !important;
-        border-top: 1px solid rgba(255, 255, 255, 0.14) !important;
-        box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.7) !important;
-        padding: 6px 14px 8px;
-        min-height: 62px;
-        gap: 10px;
-        position: relative;
+        padding: 6px 12px;
+        min-height: 56px;
+        gap: 12px;
     }
 
     .track-info {
         flex: 1;
         min-width: 0;
-        gap: 10px;
-    }
-
-    .album-art {
-        width: 40px;
-        height: 40px;
-        border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        flex-shrink: 0;
-    }
-
-    .track-name {
-        font-size: 13px;
-        font-weight: 700;
-        color: #ffffff !important;
-        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
-    }
-
-    .artist-name {
-        font-size: 11px;
-        color: rgba(255, 255, 255, 0.65) !important;
-    }
-
-    .track-info .control-btn {
-        color: rgba(255, 255, 255, 0.8) !important;
     }
 
     .volume-controls {
@@ -2211,13 +2178,7 @@ body.player-bar-hidden .player-bar {
     }
 
     .control-buttons {
-        gap: 18px;
-        color: rgba(255, 255, 255, 0.85) !important;
-    }
-
-    .control-buttons i {
-        font-size: 18px;
-        color: rgba(255, 255, 255, 0.85) !important;
+        gap: 16px;
     }
 
     .control-buttons .fa-random,
@@ -2226,25 +2187,14 @@ body.player-bar-hidden .player-bar {
         display: none !important;
     }
 
-    .play-pause-btn {
-        width: 42px !important;
-        height: 42px !important;
-        background: #ffffff !important;
-        color: #000000 !important;
-        font-size: 16px !important;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
-    }
-
-    /* Thin glowing progress line pinned to bottom edge */
     .progress-row {
         position: absolute;
         bottom: 0;
         left: 0;
         width: 100%;
-        height: 3px;
+        height: 2px;
         margin: 0;
         padding: 0;
-        display: block !important;
     }
 
     .progress-time {
@@ -2253,19 +2203,17 @@ body.player-bar-hidden .player-bar {
 
     .progress-container-inline {
         width: 100%;
-        display: block !important;
     }
 
     .progress-bar {
-        height: 3px;
-        background: rgba(255, 255, 255, 0.12);
+        height: 2px;
+        background: rgba(255, 255, 255, 0.1);
         border-radius: 0;
     }
 
     .progress-fill {
         border-radius: 0;
-        background: var(--m3-primary) !important;
-        box-shadow: 0 0 10px var(--m3-primary), 0 0 4px rgba(255, 255, 255, 0.3);
+        box-shadow: 0 0 8px var(--m3-primary);
     }
 
     .progress-fill::after {
