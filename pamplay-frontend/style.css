@@ -707,9 +707,9 @@ body.lang-view-active .top-header .search-container.premium-search {
 
 /* Player Bar Styling */
 .player-bar {
-    background: linear-gradient(180deg, var(--m3-surface-2), var(--m3-surface));
-    backdrop-filter: blur(18px);
-    border-top: 1px solid var(--m3-outline);
+    background: color-mix(in srgb, var(--m3-surface) 75%, rgba(0,0,0,0.5));
+    backdrop-filter: blur(30px) saturate(180%);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
     display: grid;
     grid-template-columns: 210px 1fr 190px;
     align-items: center;
@@ -718,7 +718,7 @@ body.lang-view-active .top-header .search-container.premium-search {
     min-width: 0;
     position: relative;
     min-height: 62px;
-    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.5);
     transition: min-height 0.25s var(--ease-smooth), padding 0.25s var(--ease-smooth), opacity 0.2s var(--ease-smooth);
 }
 
@@ -825,19 +825,19 @@ body.player-bar-hidden .player-bar {
 }
 
 .play-pause-btn {
-    width: 34px;
-    height: 34px;
-    background: var(--m3-primary-container);
-    color: #fff;
+    width: 36px;
+    height: 36px;
+    background: var(--m3-primary);
+    color: var(--m3-on-primary);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
+    font-size: 15px;
     cursor: pointer;
     transition: var(--transition-fast);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    border: none;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
 }
 
 .play-pause-btn:hover {
@@ -864,8 +864,8 @@ body.player-bar-hidden .player-bar {
 
 .progress-bar {
     width: 100%;
-    height: 3px;
-    background: rgba(255, 255, 255, 0.16);
+    height: 4px;
+    background: rgba(255, 255, 255, 0.15);
     position: relative;
     cursor: pointer;
     touch-action: none;
@@ -874,10 +874,11 @@ body.player-bar-hidden .player-bar {
 
 .progress-fill {
     height: 100%;
-    background: var(--m3-on-surface);
+    background: var(--m3-primary);
     border-radius: 999px;
     width: 0%;
     position: relative;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--m3-primary) 60%, transparent);
 }
 
 .progress-bar:hover .progress-fill {
@@ -892,10 +893,11 @@ body.player-bar-hidden .player-bar {
     transform: translateY(-50%);
     width: 12px;
     height: 12px;
-    background: white;
+    background: #fff;
     border-radius: 50%;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
     opacity: 0;
+    transition: opacity 0.2s ease;
 }
 
 .progress-bar:hover .progress-fill::after {
@@ -913,17 +915,18 @@ body.player-bar-hidden .player-bar {
 
 .volume-bar {
     width: 84px;
-    height: 3px;
-    background: rgba(255, 255, 255, 0.16);
+    height: 4px;
+    background: rgba(255, 255, 255, 0.15);
     border-radius: 999px;
     cursor: pointer;
 }
 
 .volume-fill {
     height: 100%;
-    background: var(--m3-on-surface);
+    background: var(--m3-primary);
     border-radius: 999px;
     width: 70%;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--m3-primary) 60%, transparent);
 }
 
 .speed-toggle {
