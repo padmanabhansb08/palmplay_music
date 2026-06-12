@@ -4573,6 +4573,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
                 if (track) {
                     showToast('Refreshing audio stream...', 'fa-sync fa-spin');
+                    // Force the stream resolver to fetch a fresh URL
+                    track._unplayable = true;
                     playTrack(state.currentPlaylistIndex, state.currentTrackIndex);
                     return;
                 }
