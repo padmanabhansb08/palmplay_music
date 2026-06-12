@@ -55,44 +55,63 @@
                 np.className = 'now-playing-panel';
                 np.setAttribute('aria-hidden', 'true');
                 np.innerHTML = `
-                    <div class="now-playing-header">
-                        <button type="button" id="np-close" aria-label="Close"><i class="fas fa-chevron-down"></i></button>
-                        <span class="np-header-label">NOW PLAYING</span>
-                        <button type="button" id="np-queue" aria-label="Queue"><i class="fas fa-list-ul"></i></button>
-                    </div>
-                    <div class="now-playing-scroll">
-                        <div class="now-playing-art" id="np-art"></div>
-                        <div class="now-playing-meta">
-                            <p class="np-album" id="np-album"></p>
-                            <h2 id="np-title">—</h2>
-                            <p id="np-artist">—</p>
+                    <div class="np-bg-layer" id="np-bg-layer"></div>
+                    <div class="np-content">
+                        <div class="now-playing-header">
+                            <button type="button" id="np-close" aria-label="Close"><i class="fas fa-chevron-down"></i></button>
+                            <span class="np-header-label">NOW PLAYING</span>
+                            <button type="button" id="np-queue" aria-label="Queue"><i class="fas fa-list-ul"></i></button>
                         </div>
-                        <div class="np-progress-row">
-                            <span class="np-time" id="np-time-current">0:00</span>
-                            <div class="np-progress-bar" id="np-progress-bar" role="slider" aria-label="Seek">
-                                <div class="np-progress-fill" id="np-progress-fill"></div>
+                        
+                        <div class="np-main-layout">
+                            <div class="np-left-column">
+                                <div class="now-playing-art" id="np-art"></div>
+                                <div class="now-playing-meta">
+                                    <p class="np-album" id="np-album"></p>
+                                    <h2 id="np-title">—</h2>
+                                    <p id="np-artist">—</p>
+                                </div>
                             </div>
-                            <span class="np-time" id="np-time-total">0:00</span>
+                            
+                            <div class="np-right-column">
+                                <div class="np-tabs">
+                                    <button type="button" class="np-tab active" data-np-tab="song">Song</button>
+                                    <button type="button" class="np-tab" data-np-tab="lyrics">Lyrics</button>
+                                </div>
+                                <div class="np-lyrics-panel" id="np-lyrics-panel" hidden>
+                                    <div class="np-lyrics" id="np-lyrics">Lyrics appear here when available.</div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="np-actions">
-                            <button type="button" class="np-action-btn" id="np-like" aria-label="Like"><i class="far fa-heart"></i></button>
-                            <button type="button" class="np-action-btn" id="np-add-playlist" aria-label="Add to playlist"><i class="fas fa-plus"></i></button>
-                            <button type="button" class="np-action-btn" id="np-share" aria-label="Share"><i class="fas fa-share-alt"></i></button>
+
+                        <div class="now-playing-footer">
+                            <div class="np-control-center">
+                                <div class="np-actions">
+                                    <button type="button" class="np-action-btn" id="np-like" aria-label="Like"><i class="far fa-heart"></i></button>
+                                    <button type="button" class="np-action-btn" id="np-add-playlist" aria-label="Add to playlist"><i class="fas fa-plus"></i></button>
+                                    <button type="button" class="np-action-btn" id="np-share" aria-label="Share"><i class="fas fa-share-alt"></i></button>
+                                </div>
+                                
+                                <div class="np-playback-core">
+                                    <div class="now-playing-controls">
+                                        <button type="button" class="np-transport np-shuffle" id="np-shuffle" aria-label="Shuffle"><i class="fas fa-random"></i></button>
+                                        <button type="button" class="np-transport np-prev" aria-label="Previous"><i class="fas fa-step-backward"></i></button>
+                                        <div class="play-pause-btn np-play" aria-label="Play"><i class="fas fa-play"></i></div>
+                                        <button type="button" class="np-transport np-next" aria-label="Next"><i class="fas fa-step-forward"></i></button>
+                                        <button type="button" class="np-transport np-repeat" id="np-repeat" aria-label="Repeat"><i class="fas fa-redo-alt"></i></button>
+                                    </div>
+                                    <div class="np-progress-row">
+                                        <span class="np-time" id="np-time-current">0:00</span>
+                                        <div class="np-progress-bar" id="np-progress-bar" role="slider" aria-label="Seek">
+                                            <div class="np-progress-fill" id="np-progress-fill"></div>
+                                        </div>
+                                        <span class="np-time" id="np-time-total">0:00</span>
+                                    </div>
+                                </div>
+                                
+                                <div class="np-footer-right"></div>
+                            </div>
                         </div>
-                        <div class="np-tabs">
-                            <button type="button" class="np-tab active" data-np-tab="song">Song</button>
-                            <button type="button" class="np-tab" data-np-tab="lyrics">Lyrics</button>
-                        </div>
-                        <div class="np-lyrics-panel" id="np-lyrics-panel" hidden>
-                            <div class="np-lyrics" id="np-lyrics">Lyrics appear here when available.</div>
-                        </div>
-                    </div>
-                    <div class="now-playing-controls">
-                        <button type="button" class="np-transport np-shuffle" id="np-shuffle" aria-label="Shuffle"><i class="fas fa-random"></i></button>
-                        <button type="button" class="np-transport np-prev" aria-label="Previous"><i class="fas fa-step-backward"></i></button>
-                        <div class="play-pause-btn np-play" aria-label="Play"><i class="fas fa-play"></i></div>
-                        <button type="button" class="np-transport np-next" aria-label="Next"><i class="fas fa-step-forward"></i></button>
-                        <button type="button" class="np-transport np-repeat" id="np-repeat" aria-label="Repeat"><i class="fas fa-redo-alt"></i></button>
                     </div>
                 `;
                 document.body.appendChild(np);
@@ -329,13 +348,24 @@
                 const a = document.getElementById('np-artist');
                 const ar = document.getElementById('np-art');
                 const alb = document.getElementById('np-album');
+                const bgLayer = document.getElementById('np-bg-layer');
+                
                 if (t) t.textContent = name;
                 if (a) a.textContent = artist;
                 if (ar && art) ar.style.backgroundImage = art;
+                if (bgLayer && art) bgLayer.style.backgroundImage = art;
+                
                 if (alb && ctx?.track?.album) {
                     const albumLabel = ctx.track.album;
-                    alb.textContent = albumLabel && albumLabel !== 'Stream' && albumLabel !== 'Single' ? albumLabel : '';
-                    alb.style.display = alb.textContent ? 'block' : 'none';
+                    // Hide if it's "Stream", "Single", or perfectly matches the track name (redundant)
+                    if (albumLabel && albumLabel !== 'Stream' && albumLabel !== 'Single' && albumLabel.toLowerCase() !== name.toLowerCase()) {
+                        alb.textContent = albumLabel;
+                        alb.style.display = 'block';
+                    } else {
+                        alb.style.display = 'none';
+                    }
+                } else if (alb) {
+                    alb.style.display = 'none';
                 }
             }
 
