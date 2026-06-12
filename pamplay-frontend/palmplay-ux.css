@@ -835,6 +835,8 @@ body.now-playing-open {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 20px;
+    grid-column: 1 / -1;
+    width: 100%;
 }
 
 .skeleton-card {

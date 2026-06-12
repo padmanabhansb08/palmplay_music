@@ -4806,8 +4806,12 @@ document.addEventListener('DOMContentLoaded', () => {
             playIcon.className = state.isPlaying ? 'fas fa-pause' : 'fas fa-play';
         }
 
-        if (audio.duration) {
+        if (audio.duration && isFinite(audio.duration)) {
             timeTotal.textContent = formatTime(audio.duration);
+        } else if (track.duration) {
+            timeTotal.textContent = formatTime(track.duration);
+        } else {
+            timeTotal.textContent = '0:00';
         }
 
         updateMediaSession(track);
