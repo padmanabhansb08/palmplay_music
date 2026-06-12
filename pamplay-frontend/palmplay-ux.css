@@ -1593,29 +1593,132 @@ body.now-playing-open {
     }
 
     .player-bar {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto auto;
-        height: auto;
-        min-height: var(--player-height);
-        padding: 10px 12px 12px;
-        gap: 8px;
-    }
-
-    .player-section--center {
-        order: -1;
-        width: 100%;
+        /* Single-row flex layout: track info left, controls right */
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        grid-template-columns: unset !important;
+        grid-template-rows: unset !important;
+        background: rgba(10, 10, 12, 0.97) !important;
+        backdrop-filter: blur(30px) saturate(200%) !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.14) !important;
+        box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.8) !important;
+        min-height: 62px !important;
+        height: auto !important;
+        padding: 6px 14px 8px !important;
+        gap: 10px !important;
+        position: relative !important;
     }
 
     .player-section--left {
-        width: 100%;
+        /* Track info: takes remaining space on the left */
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        width: auto !important;
+        order: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 10px !important;
     }
 
-    .player-section--right {
-        display: none;
+    .player-section--center {
+        /* Controls: shrink to fit on the right */
+        flex: 0 0 auto !important;
+        width: auto !important;
+        order: 1 !important;
+        padding: 0 !important;
     }
 
+    .player-section--right,
+    .volume-controls,
     .volume-controls.mobile-hide {
-        display: none;
+        display: none !important;
+    }
+
+    /* Hide shuffle/repeat/prev on mobile — only show play + next */
+    .control-buttons .fa-random,
+    .control-buttons .fa-step-backward,
+    .control-buttons .fa-redo-alt {
+        display: none !important;
+    }
+
+    .control-buttons {
+        gap: 18px !important;
+        color: rgba(255, 255, 255, 0.9) !important;
+    }
+
+    .control-buttons i {
+        font-size: 20px !important;
+        color: rgba(255, 255, 255, 0.9) !important;
+    }
+
+    .play-pause-btn {
+        width: 44px !important;
+        height: 44px !important;
+        background: #ffffff !important;
+        color: #111111 !important;
+        font-size: 17px !important;
+        border: none !important;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6) !important;
+    }
+
+    .album-art {
+        width: 42px !important;
+        height: 42px !important;
+        border-radius: 8px !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+        flex-shrink: 0 !important;
+    }
+
+    .track-name {
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        color: #ffffff !important;
+        text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+    }
+
+    .artist-name {
+        font-size: 11px !important;
+        color: rgba(255, 255, 255, 0.65) !important;
+    }
+
+    /* Progress row pinned as a thin glowing line at bottom edge */
+    .progress-row {
+        position: absolute !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 3px !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        gap: 0 !important;
+        display: block !important;
+    }
+
+    .progress-time {
+        display: none !important;
+    }
+
+    .progress-container-inline {
+        width: 100% !important;
+        height: 3px !important;
+        flex: unset !important;
+    }
+
+    .progress-bar {
+        height: 3px !important;
+        background: rgba(255, 255, 255, 0.1) !important;
+        border-radius: 0 !important;
+    }
+
+    .progress-fill {
+        border-radius: 0 !important;
+        box-shadow: 0 0 10px var(--m3-primary), 0 0 4px rgba(255, 255, 255, 0.3) !important;
+    }
+
+    .progress-fill::after {
+        display: none !important;
     }
 
     .main-view .content-wrapper {
