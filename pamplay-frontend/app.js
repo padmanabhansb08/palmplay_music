@@ -4398,6 +4398,16 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Stop current audio immediately so old track doesn't play while new one resolves
         audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+
+        // Synchronously unlock audio context and audio element on user gesture for iOS/Safari
+        if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume().catch(() => {});
+        }
+        audio.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU5LjE2LjEwMAAAAAAAAAAAAAAA//OEAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAABIAD+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+/v7+AAAAAExhdmYAAAAAAAAAAAAAAAAAAAAAACQAAAAAAAAAASBvyAAAAAAA//OEAEAAAAAAwAAAAAA//OEAEAAAAAAwAAAAAA//OEAEAAAAAAwAAAAAA';
+        const unlockPromise = audio.play();
+        if (unlockPromise !== undefined) unlockPromise.catch(() => {});
 
         ensureQueueForCurrentTrack(plIndex, tIndex, {
             forceReset: !autoNext && !fromQueue,
@@ -4468,9 +4478,9 @@ document.addEventListener('DOMContentLoaded', () => {
             state.isPlaying = playStarted && !audio.paused;
             updatePlayerUI();
 
-            let ok = playStarted || isAudioReadyToPlay();
+            let ok = isAudioReadyToPlay();
             if (!ok) {
-                ok = await waitForPlaybackReady(2000);
+                ok = await waitForPlaybackReady(4000);
             }
             if (isStale()) return;
 
