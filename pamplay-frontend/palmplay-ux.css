@@ -2,13 +2,14 @@
 
 :root {
     --bottom-nav-height: 64px;
+    --player-mobile-height: 64px;
     --player-expanded-height: 90px;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* ─── App shell ─── */
 #app {
-    padding-bottom: calc(var(--player-height) + var(--bottom-nav-height) + var(--safe-bottom));
+    padding-bottom: calc(var(--player-mobile-height) + var(--bottom-nav-height) + var(--safe-bottom));
 }
 
 body.player-bar-hidden #app {
@@ -16,7 +17,7 @@ body.player-bar-hidden #app {
 }
 
 body.player-expanded #app {
-    padding-bottom: calc(var(--player-expanded-height) + var(--bottom-nav-height) + var(--safe-bottom));
+    padding-bottom: calc(var(--player-mobile-height) + var(--bottom-nav-height) + var(--safe-bottom));
 }
 
 .main-view {
@@ -1643,24 +1644,46 @@ body:not(.player-bar-hidden) .pwa-install-banner {
         display: flex;
     }
 
+    /* ── Mobile mini-player: single-row, compact ── */
     .player-bar {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto auto;
-        height: auto;
-        min-height: var(--player-height);
-        padding: 10px 12px 12px;
-        gap: 8px;
+        display: flex !important;
+        flex-direction: row;
+        align-items: center;
+        height: var(--player-mobile-height) !important;
+        min-height: var(--player-mobile-height) !important;
+        padding: 0 12px;
+        padding-bottom: 0;
+        gap: 0;
+        overflow: hidden;
     }
 
-    .player-section--center {
-        order: -1;
-        width: 100%;
-    }
-
+    /* Track info: art + name/artist fills left */
     .player-section--left {
-        width: 100%;
+        flex: 1;
+        min-width: 0;
+        width: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        overflow: hidden;
     }
 
+    /* Center controls become a minimal set on the right */
+    .player-section--center {
+        order: 1;
+        flex: 0 0 auto;
+        width: auto;
+        padding: 0;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 0;
+    }
+
+    /* Progress row is absolutely positioned at bottom of player (handled by style.css) */
+    /* Do not hide it here — let it escape flexbox with position:absolute */
+
+    /* Volume/right section hidden */
     .player-section--right {
         display: none;
     }
@@ -1861,7 +1884,7 @@ body:not(.player-bar-hidden) .pwa-install-banner {
     }
 
     #app {
-        padding-bottom: calc(120px + var(--bottom-nav-height) + var(--safe-bottom));
+        padding-bottom: calc(var(--player-mobile-height) + var(--bottom-nav-height) + var(--safe-bottom));
     }
 }
 

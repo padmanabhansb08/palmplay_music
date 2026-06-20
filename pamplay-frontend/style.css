@@ -2153,70 +2153,81 @@ body.player-bar-hidden .player-bar {
 }
 
 /* Mobile Player Bar (Mini-Player) */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
+    /* Thin progress strip pinned to the very bottom of the player bar */
     .player-bar {
-        display: flex;
-        justify-content: space-between;
-        padding: 6px 12px;
-        min-height: 56px;
-        gap: 12px;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: calc(var(--bottom-nav-height) + var(--safe-bottom));
     }
 
-    .track-info {
-        flex: 1;
-        min-width: 0;
-    }
-
-    .volume-controls {
-        display: none !important;
-    }
-
-    .player-controls {
-        flex: 0 0 auto;
-        width: auto;
-        padding: 0;
-    }
-
-    .control-buttons {
-        gap: 16px;
-    }
-
-    .control-buttons .fa-random,
-    .control-buttons .fa-step-backward,
-    .control-buttons .fa-redo-alt {
-        display: none !important;
-    }
-
-    .progress-row {
+    /* Progress bar: 2px strip at very bottom edge of player */
+    .player-bar .progress-row {
         position: absolute;
         bottom: 0;
         left: 0;
+        right: 0;
         width: 100%;
-        height: 2px;
-        margin: 0;
+        height: 3px;
         padding: 0;
+        margin: 0;
+        gap: 0;
+        display: flex !important;
+        align-items: stretch;
+        max-width: none;
     }
 
-    .progress-time {
+    .player-bar .progress-row .progress-time {
         display: none !important;
     }
 
-    .progress-container-inline {
-        width: 100%;
+    .player-bar .progress-row .progress-container-inline {
+        flex: 1;
+        height: 3px;
+        display: flex;
+        align-items: stretch;
     }
 
-    .progress-bar {
-        height: 2px;
-        background: rgba(255, 255, 255, 0.1);
+    .player-bar .progress-row .progress-bar {
+        height: 3px;
         border-radius: 0;
+        background: rgba(255, 255, 255, 0.12);
     }
 
-    .progress-fill {
+    .player-bar .progress-row .progress-fill {
         border-radius: 0;
-        box-shadow: 0 0 8px var(--m3-primary);
+        box-shadow: 0 0 6px var(--m3-primary);
     }
 
-    .progress-fill::after {
+    .player-bar .progress-row .progress-fill::after {
         display: none !important;
+    }
+
+    /* Hide shuffle, repeat, prev on mobile — keep only play + next */
+    .player-bar .control-buttons .fa-random,
+    .player-bar .control-buttons .fa-step-backward,
+    .player-bar .control-buttons .fa-redo-alt {
+        display: none !important;
+    }
+
+    .player-bar .control-buttons {
+        gap: 12px;
+        justify-content: flex-end;
+    }
+
+    .player-bar .play-pause-btn {
+        width: 36px;
+        height: 36px;
+        font-size: 14px;
+    }
+
+    .player-bar .fa-step-forward {
+        font-size: 18px;
+    }
+
+    /* Like button: keep visible, slightly smaller */
+    .player-bar .player-like-btn {
+        display: inline-flex;
     }
 }
