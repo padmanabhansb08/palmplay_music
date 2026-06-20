@@ -894,7 +894,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ─── Dynamic Theme from Album Art ──────────────────────────────────────────
     function applyDynamicTheme(artUrl) {
-        if (!artUrl || artUrl.includes('unsplash')) return;
+        if (!artUrl) return;
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
@@ -904,15 +904,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, 16, 16);
                 const d = ctx.getImageData(0, 0, 16, 16).data;
+                
                 let r = 0, g = 0, b = 0, count = 0;
-                for (let i = 0; i < d.length; i += 4) {
-                    // Skip near-black and near-white pixels
-                    const brightness = (d[i] + d[i+1] + d[i+2]) / 3;
-                    if (brightness > 20 && brightness < 235) {
-                        r += d[i]; g += d[i+1]; b += d[i+2]; count++;
+                let rTL = 0, gTL = 0, bTL = 0, countTL = 0;
+                let rBR = 0, gBR = 0, bBR = 0, countBR = 0;
+
+                for (let y = 0; y < 16; y++) {
+                    for (let x = 0; x < 16; x++) {
+                        const idx = (y * 16 + x) * 4;
+                        const pr = d[idx];
+                        const pg = d[idx+1];
+                        const pb = d[idx+2];
+                        const brightness = (pr + pg + pb) / 3;
+
+                        // Exclude near-black and near-white pixels for vibrant tones
+                        if (brightness > 15 && brightness < 240) {
+                            r += pr; g += pg; pb += pb; // Global average
+                            r += pr; g += pg; b += pb; count++;
+
+                            // Top-Left Quadrant (Accent 1)
+                            if (x < 8 && y < 8) {
+                                rTL += pr; gTL += pg; bTL += pb; countTL++;
+                            }
+                            // Bottom-Right Quadrant (Accent 2)
+                            if (x >= 8 && y >= 8) {
+                                rBR += pr; gBR += pg; bBR += pb; countBR++;
+                            }
+                        }
                     }
                 }
+
                 if (count === 0) return;
+
                 r = Math.round(r / count);
                 g = Math.round(g / count);
                 b = Math.round(b / count);
@@ -924,10 +947,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 g = Math.min(255, max === g ? Math.round(g * boost) : Math.round(g * 0.7));
                 b = Math.min(255, max === b ? Math.round(b * boost) : Math.round(b * 0.7));
 
+                // Accent 1 (Top-Left quadrant or shifted primary)
+                let r1 = r, g1 = g, b1 = b;
+                if (countTL > 0) {
+                    r1 = Math.round(rTL / countTL);
+                    g1 = Math.round(gTL / countTL);
+                    b1 = Math.round(bTL / countTL);
+                }
+
+                // Accent 2 (Bottom-Right quadrant or shifted primary)
+                let r2 = r, g2 = g, b2 = b;
+                if (countBR > 0) {
+                    r2 = Math.round(rBR / countBR);
+                    g2 = Math.round(gBR / countBR);
+                    b2 = Math.round(bBR / countBR);
+                }
+
                 // Apply to CSS variables with smooth transition
                 const root = document.documentElement;
                 root.style.setProperty('--primary', `rgb(${r},${g},${b})`);
                 root.style.setProperty('--primary-hover', `rgba(${r},${g},${b},0.8)`);
+                root.style.setProperty('--primary-rgb', `${r}, ${g}, ${b}`);
+                root.style.setProperty('--accent-1', `rgb(${r1},${g1},${b1})`);
+                root.style.setProperty('--accent-2', `rgb(${r2},${g2},${b2})`);
 
                 // Also update the ambient background orb
                 const orb1 = document.getElementById('orb-1');
@@ -4858,6 +4900,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             playIcon.className = state.isPlaying ? 'fas fa-pause' : 'fas fa-play';
         }
+        document.body.classList.toggle('player-playing', state.isPlaying);
 
         if (audio.duration && isFinite(audio.duration)) {
             timeTotal.textContent = formatTime(audio.duration);

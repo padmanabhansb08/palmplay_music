@@ -237,7 +237,48 @@
                 panel?.setAttribute('aria-hidden', 'true');
                 document.body.classList.remove('now-playing-open');
                 this.nowPlayingOpen = false;
+                if (panel) panel.style.transform = '';
             };
+
+            // Swipe-down touch gesture to dismiss the now-playing panel on mobile
+            let touchStartY = 0;
+            let touchCurrentY = 0;
+            let isSwiping = false;
+
+            panel?.addEventListener('touchstart', (e) => {
+                const target = e.target;
+                // Avoid capturing touches on interactive/scrollable areas
+                if (target.closest('#np-lyrics-panel') || target.closest('.np-time') || target.closest('.np-progress-bar') || target.closest('button') || target.closest('.now-playing-controls')) {
+                    return;
+                }
+                touchStartY = e.touches[0].clientY;
+                isSwiping = true;
+                if (panel) panel.style.transition = 'none';
+            }, { passive: true });
+
+            panel?.addEventListener('touchmove', (e) => {
+                if (!isSwiping) return;
+                touchCurrentY = e.touches[0].clientY;
+                const deltaY = touchCurrentY - touchStartY;
+                if (deltaY > 0 && panel) {
+                    panel.style.transform = `translateY(${deltaY}px)`;
+                }
+            }, { passive: true });
+
+            panel?.addEventListener('touchend', (e) => {
+                if (!isSwiping) return;
+                isSwiping = false;
+                if (panel) panel.style.transition = '';
+                
+                const deltaY = touchCurrentY - touchStartY;
+                if (deltaY > 80) {
+                    close();
+                } else if (panel) {
+                    panel.style.transform = '';
+                }
+                touchStartY = 0;
+                touchCurrentY = 0;
+            });
 
             window.openNowPlaying = open;
             window.closeNowPlaying = close;
