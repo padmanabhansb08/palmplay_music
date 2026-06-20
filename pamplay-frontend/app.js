@@ -564,6 +564,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!fromHistory) this.push(view);
             const onExplore = ppRoutes().isExplorePage();
 
+            // Sync sidebar active highlights
+            const targetRouteKey = view === 'search' ? 'discover' : view;
+            document.querySelectorAll('.nav-menu .nav-item').forEach((l) => {
+                const routeKey = l.getAttribute('data-pp-route');
+                l.classList.toggle('active', routeKey === targetRouteKey);
+            });
+
             if (view === 'search') {
                 state.currentView = 'search';
                 setHeaderSearchVisible(true);
@@ -573,6 +580,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 greetingEl && (greetingEl.style.display = 'none');
                 renderSearch();
                 window.PalmPlayUX?.activateBottomNav?.('discover');
+
+                // Sync URL hash
+                if (onExplore && window.location.hash !== '#discover') {
+                    history.replaceState(null, '', '#discover');
+                }
                 return;
             }
             if (view === 'explore' && onExplore) {
@@ -585,6 +597,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const chip = document.querySelector('.chip.active');
                 renderExplore(chip?.getAttribute('data-genre') || 'Trending');
                 window.PalmPlayUX?.activateBottomNav?.('explore');
+
+                // Sync URL hash
+                if (window.location.hash) {
+                    history.replaceState(null, '', window.location.pathname);
+                }
                 return;
             }
             state.currentView = 'home';
@@ -662,7 +679,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function routeInitialView() {
         if (ppRoutes().isExplorePage()) {
-            const discover = !window.location.hash || window.location.hash === '#discover';
+            const discover = window.location.hash === '#discover';
             if (discover) window.PalmPlayNav.go('search', true);
             else window.PalmPlayNav.go('explore', true);
         } else {
@@ -1074,7 +1091,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const isExploreOnly = routeKey === 'explore' || link.hasAttribute('data-nav-explore') || (link.textContent.trim().toLowerCase() === 'explore' && !href.includes('#discover'));
 
                 if ((routeKey === 'home' || href.includes('home')) && !ppRoutes().isHomePage()) return;
-                if ((routeKey === 'explore' || href.includes('explore')) && !href.includes('#') && !onExplorePage && isExploreOnly) return;
+                if ((routeKey === 'explore' || routeKey === 'discover' || href.includes('explore')) && !ppRoutes().isExplorePage()) return;
 
                 e.preventDefault();
                 navLinks.forEach(l => l.classList.remove('active'));

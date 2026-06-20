@@ -548,10 +548,10 @@
             const routes = window.PalmPlayRoutes;
             if (routes?.isExplorePage?.()) {
                 const active = document.querySelector('.nav-item.active');
-                const label = active?.textContent.trim().toLowerCase();
-                if (label === 'search') {
+                const routeKey = active?.getAttribute('data-pp-route');
+                if (routeKey === 'discover') {
                     this.activateBottomNav('discover');
-                } else if (label === 'explore') {
+                } else if (routeKey === 'explore') {
                     this.activateBottomNav('explore');
                 }
             } else if (routes?.isHomePage?.()) {

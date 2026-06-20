@@ -5,6 +5,6 @@
     "config": "node scripts/generate-config.js",
     "build": "node scripts/generate-config.js",
     "prestart": "node scripts/generate-config.js",
-    "start": "python -m http.server 8000"
+    "start": "npx http-server -p 8000"
   }
 }
