@@ -1102,7 +1102,7 @@ body.now-playing-open {
     justify-content: space-between;
     gap: 12px;
     position: fixed;
-    bottom: calc(var(--player-height) + var(--bottom-nav-height) + var(--safe-bottom) + 12px);
+    bottom: 12px;
     left: 12px;
     right: 12px;
     z-index: 1100;
@@ -1114,6 +1114,11 @@ body.now-playing-open {
     font-size: 14px;
     font-weight: 600;
     animation: viewFadeIn 0.35s var(--ease-smooth);
+}
+
+/* On desktop, shift up if player is visible */
+body:not(.player-bar-hidden) .pwa-install-banner {
+    bottom: calc(var(--player-height) + 12px);
 }
 
 .pwa-install-banner span {
@@ -1156,7 +1161,12 @@ body.now-playing-open {
 }
 
 @media (max-width: 1024px) {
+    /* Mobile/tablet: base position is above bottom nav */
     .pwa-install-banner {
+        bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 8px);
+    }
+    /* Mobile/tablet: shift further up if player is also visible */
+    body:not(.player-bar-hidden) .pwa-install-banner {
         bottom: calc(var(--player-height) + var(--bottom-nav-height) + var(--safe-bottom) + 8px);
     }
 }
