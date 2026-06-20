@@ -2250,9 +2250,8 @@ body.player-bar-hidden .player-bar {
         transform: scale(0.88) !important;
     }
 
-    /* ── Controls: hide unwanted, show play + next only ── */
+    /* ── Controls: hide shuffle + repeat only; keep prev, play, next ── */
     .player-bar .control-buttons .fa-random,
-    .player-bar .control-buttons .fa-step-backward,
     .player-bar .control-buttons .fa-redo-alt {
         display: none !important;
     }
@@ -2260,13 +2259,14 @@ body.player-bar-hidden .player-bar {
     .player-bar .control-buttons {
         display: flex !important;
         align-items: center;
-        gap: 8px !important;
+        gap: 4px !important;
         justify-content: flex-end;
     }
 
-    /* Skip forward icon — subtle, tap-friendly */
+    /* Prev + Next icons — identical size, tap-friendly circles ── */
+    .player-bar .control-buttons .fa-step-backward,
     .player-bar .control-buttons .fa-step-forward {
-        font-size: 19px !important;
+        font-size: 18px !important;
         color: rgba(255, 255, 255, 0.75) !important;
         width: 36px !important;
         height: 36px !important;
@@ -2278,11 +2278,13 @@ body.player-bar-hidden .player-bar {
         transition: color 0.15s ease, background 0.15s ease, transform 0.12s ease !important;
     }
 
+    .player-bar .control-buttons .fa-step-backward:hover,
     .player-bar .control-buttons .fa-step-forward:hover {
         color: #fff !important;
         background: rgba(255, 255, 255, 0.08);
     }
 
+    .player-bar .control-buttons .fa-step-backward:active,
     .player-bar .control-buttons .fa-step-forward:active {
         transform: scale(0.86) !important;
     }
