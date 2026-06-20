@@ -919,7 +919,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         // Exclude near-black and near-white pixels for vibrant tones
                         if (brightness > 15 && brightness < 240) {
-                            r += pr; g += pg; pb += pb; // Global average
                             r += pr; g += pg; b += pb; count++;
 
                             // Top-Left Quadrant (Accent 1)
