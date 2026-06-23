@@ -30,6 +30,47 @@ const state = {
     queueExplicit: false
 };
 
+// ─── Cross-Page Playback Persistence ─────────────────────────────────────────
+const PP_PLAYBACK_STATE_KEY = 'palmplay_xpage_playback_v1';
+
+window.savePalmPlaybackState = function() {
+    if (state.currentPlaylistIndex < 0) {
+        sessionStorage.removeItem(PP_PLAYBACK_STATE_KEY);
+        return;
+    }
+    try {
+        const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+        if (!track) return;
+        // Only save streamable/catalog tracks (blob URLs don't survive navigation)
+        const url = track.url;
+        if (!url || url.startsWith('blob:')) return;
+        const payload = {
+            url,
+            currentTime: audio.currentTime || 0,
+            isPlaying: state.isPlaying,
+            volume: state.volume,
+            isMuted: state.isMuted,
+            isShuffle: state.isShuffle,
+            repeatMode: state.repeatMode,
+            playbackSpeed: state.playbackSpeed,
+            track: {
+                id: track.id,
+                name: track.name,
+                artist: track.artist,
+                album: track.album,
+                duration: track.duration,
+                art: track.art,
+                isCatalog: !!track.isCatalog
+            },
+            savedAt: Date.now()
+        };
+        sessionStorage.setItem(PP_PLAYBACK_STATE_KEY, JSON.stringify(payload));
+    } catch(e) {
+        console.warn('savePalmPlaybackState failed', e);
+    }
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Database Initialization
 const db = new Dexie("PalmPlayDB");
 db.version(2).stores({
@@ -806,8 +847,73 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => filterCards(q), 300);
             }
             history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+        } else if (!spotifyHandled) {
+            // Try to restore cross-page playback first; fall back to deep-link
+            const restored = await restoreCrossPagePlayback();
+            if (!restored) await handlePlaybackDeepLink();
         } else {
             await handlePlaybackDeepLink();
+        }
+    }
+
+    async function restoreCrossPagePlayback() {
+        try {
+            const raw = sessionStorage.getItem(PP_PLAYBACK_STATE_KEY);
+            if (!raw) return false;
+            // Only restore within 30 seconds of navigation
+            const payload = JSON.parse(raw);
+            if (!payload?.url || !payload?.track?.name) return false;
+            if (Date.now() - (payload.savedAt || 0) > 30000) {
+                sessionStorage.removeItem(PP_PLAYBACK_STATE_KEY);
+                return false;
+            }
+            // Clear the saved state immediately so it doesn't re-apply on next reload
+            sessionStorage.removeItem(PP_PLAYBACK_STATE_KEY);
+
+            // Restore settings
+            state.volume = typeof payload.volume === 'number' ? payload.volume : state.volume;
+            state.isMuted = !!payload.isMuted;
+            state.isShuffle = !!payload.isShuffle;
+            state.repeatMode = typeof payload.repeatMode === 'number' ? payload.repeatMode : 0;
+            state.playbackSpeed = typeof payload.playbackSpeed === 'number' ? payload.playbackSpeed : 1.0;
+            setMasterVolume(state.isMuted ? 0 : state.volume);
+
+            // Restore the track into a temporary playlist
+            const restoredTrack = { ...payload.track, url: payload.url };
+            const plIdx = upsertTempPlaylist('xpage_restore', restoredTrack.name, [restoredTrack]);
+
+            // Play the track, then seek to saved position
+            const savedTime = payload.currentTime || 0;
+            const wasPlaying = payload.isPlaying !== false; // default true
+
+            await playTrack(plIdx, 0);
+
+            // Seek to saved position after playback starts
+            if (savedTime > 0) {
+                const seekWhenReady = () => {
+                    if (audio.readyState >= 2 && isFinite(audio.duration)) {
+                        audio.currentTime = Math.min(savedTime, audio.duration - 1);
+                    }
+                };
+                if (audio.readyState >= 2) {
+                    seekWhenReady();
+                } else {
+                    audio.addEventListener('loadedmetadata', seekWhenReady, { once: true });
+                    audio.addEventListener('canplay', seekWhenReady, { once: true });
+                }
+            }
+
+            if (!wasPlaying) {
+                audio.pause();
+                state.isPlaying = false;
+                updatePlayerUI();
+            }
+
+            return true;
+        } catch(e) {
+            console.warn('restoreCrossPagePlayback failed', e);
+            sessionStorage.removeItem(PP_PLAYBACK_STATE_KEY);
+            return false;
         }
     }
 
@@ -1158,6 +1264,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         searchInput.addEventListener('focus', () => {
             if (ppRoutes().isHomePage() && state.currentView !== 'search') {
+                if (typeof window.savePalmPlaybackState === 'function') window.savePalmPlaybackState();
                 window.location.href = ppRoutes().page('discover');
             }
         });
@@ -5857,6 +5964,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const safeIndex = Math.min(likedIndex, playlists[plIdx].tracks.length - 1);
         playTrack(plIdx, safeIndex);
     }
+
+    // Safety net: save playback state on ANY navigation/unload so music can resume on the new page
+    window.addEventListener('beforeunload', () => {
+        if (typeof window.savePalmPlaybackState === 'function') {
+            window.savePalmPlaybackState();
+        }
+    });
 
     init();
     initAtmosphere();

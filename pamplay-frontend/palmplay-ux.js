@@ -183,6 +183,7 @@
 
                     if (key === 'home') {
                         if (!isHomePage) {
+                            if (typeof window.savePalmPlaybackState === 'function') window.savePalmPlaybackState();
                             window.location.href = routes?.page('home') || 'home.html';
                             return;
                         }
@@ -191,6 +192,7 @@
                     }
                     if (key === 'explore') {
                         if (!isExplorePage) {
+                            if (typeof window.savePalmPlaybackState === 'function') window.savePalmPlaybackState();
                             window.location.href = routes?.page('explore') || 'explore.html';
                             return;
                         }
@@ -199,6 +201,7 @@
                     }
                     if (key === 'discover') {
                         if (!isExplorePage && !isHomePage) {
+                            if (typeof window.savePalmPlaybackState === 'function') window.savePalmPlaybackState();
                             window.location.href = routes?.page('discover') || 'explore.html#discover';
                             return;
                         }

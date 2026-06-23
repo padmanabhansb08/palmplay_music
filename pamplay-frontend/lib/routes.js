@@ -34,7 +34,13 @@
 
     function go(pageKey) {
         const url = pages[pageKey];
-        if (url) window.location.href = url;
+        if (url) {
+            // Save playback state before leaving so the new page can restore it
+            if (typeof window.savePalmPlaybackState === 'function') {
+                window.savePalmPlaybackState();
+            }
+            window.location.href = url;
+        }
     }
 
     function applyLinkRoutes() {
