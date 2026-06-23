@@ -4273,6 +4273,98 @@ document.addEventListener('DOMContentLoaded', () => {
         parent.appendChild(section);
     }
 
+    function renderQuickPlayHub(parent) {
+        const items = [];
+        
+        // 1. Liked Songs
+        if (likedSongs.length > 0) {
+            items.push({
+                title: 'Liked Songs',
+                artClass: 'liked-art-gradient',
+                icon: 'fas fa-heart',
+                action: () => {
+                    const item = document.querySelector('.liked-songs-item');
+                    if (item) item.click();
+                    else showLikedSongs();
+                }
+            });
+        }
+        
+        // 2. User Playlists
+        const userPlaylists = playlists.filter(pl => isUserPlaylist(pl) && pl.tracks?.length);
+        userPlaylists.slice(0, 4).forEach((pl) => {
+            const plIndex = playlists.indexOf(pl);
+            const art = pl.tracks[0]?.art || DEFAULT_ART_URL;
+            items.push({
+                title: pl.name,
+                artUrl: art,
+                action: () => showPlaylist(plIndex)
+            });
+        });
+
+        // 3. Fallbacks: Trending / Fresh Mixes to populate up to 6 cards
+        const cachedFeed = readHomeFeedCache();
+        if (cachedFeed?.trending?.length && items.length < 6) {
+            items.push({
+                title: 'Trending Mix',
+                artUrl: cachedFeed.trending[0]?.art || DEFAULT_ART_URL,
+                action: () => {
+                    const idx = playlists.findIndex(pl => pl.id === 'home_trending');
+                    if (idx !== -1) playTrack(idx, 0);
+                }
+            });
+        }
+        if (cachedFeed?.picks?.length && items.length < 6) {
+            items.push({
+                title: 'Fresh Mix',
+                artUrl: cachedFeed.picks[0]?.art || DEFAULT_ART_URL,
+                action: () => {
+                    const idx = playlists.findIndex(pl => pl.id === 'home_picks');
+                    if (idx !== -1) playTrack(idx, 0);
+                }
+            });
+        }
+
+        if (items.length === 0) return;
+
+        const container = document.createElement('section');
+        container.className = 'home-section';
+        container.innerHTML = `
+            <div class="home-section-head">
+                <div>
+                    <h3 class="home-section-title">Jump back in</h3>
+                </div>
+            </div>
+            <div class="quick-play-grid"></div>
+        `;
+        const grid = container.querySelector('.quick-play-grid');
+        
+        items.slice(0, 6).forEach((item) => {
+            const card = document.createElement('div');
+            card.className = 'quick-play-card';
+            
+            let artHtml = '';
+            if (item.artClass) {
+                artHtml = `<div class="quick-play-art ${item.artClass}"><i class="${item.icon}"></i></div>`;
+            } else {
+                artHtml = `<div class="quick-play-art" style="background-image: url('${escapeHtml(item.artUrl)}')"></div>`;
+            }
+            
+            card.innerHTML = `
+                ${artHtml}
+                <div class="quick-play-title">${escapeHtml(item.title)}</div>
+                <div class="quick-play-hover-btn"><i class="fas fa-play"></i></div>
+            `;
+            card.onclick = (e) => {
+                e.stopPropagation();
+                item.action();
+            };
+            grid.appendChild(card);
+        });
+        
+        parent.appendChild(container);
+    }
+
     function paintHomeFeed(feed, options = {}) {
         const savedUser = getSavedUser();
         const isLoggedIn = isUserLoggedIn();
@@ -4282,19 +4374,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!isLoggedIn) renderHomeLoginBanner(cardGrid);
 
-        if (options.forYouTracks?.length) {
+        // Render Quick Play Hub (Spotify-style 2-column grid at the top)
+        renderQuickPlayHub(cardGrid);
+
+        // You May Like Row
+        const forYouTracks = options.forYouTracks?.length ? options.forYouTracks : (feed.picks || []);
+        if (forYouTracks?.length) {
             renderTrackRow(
                 cardGrid,
-                'For you',
-                'Based on your listens, likes, and feedback',
-                options.forYouTracks,
+                'You may like',
+                'Recommended according to your tastes',
+                forYouTracks,
                 'home_for_you',
                 { cardOptions: { showFeedback: true } }
             );
         }
 
+        // Recently Played Row (Continue listening)
         if (history.length) {
-            renderTrackRow(cardGrid, 'Continue listening', 'Pick up where you left off', history, 'home_continue');
+            renderTrackRow(cardGrid, 'Recently listened', 'Pick up where you left off', history, 'home_continue');
         }
 
         renderTrackRow(cardGrid, 'Trending now', 'Popular on PalmPlay', feed.trending, 'home_trending');
@@ -4303,7 +4401,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderHomeQuickActions(cardGrid);
 
         if (isLoggedIn) {
-            renderLikedPreview(cardGrid);
             renderHomeLibrarySection(cardGrid, savedUser);
         }
     }

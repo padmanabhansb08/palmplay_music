@@ -2522,3 +2522,85 @@ body.player-bar-hidden .player-bar {
     justify-content: center !important;
     padding: 5px 8px !important;
 }
+
+/* ─── Spotify-style Quick Play Grid ────────────────────────────────────────── */
+.quick-play-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+    margin-bottom: 24px;
+    width: 100%;
+}
+
+.quick-play-card {
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    position: relative;
+    padding-right: 56px;
+    backdrop-filter: blur(10px);
+}
+
+.quick-play-card:hover {
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.quick-play-art {
+    width: 56px;
+    height: 56px;
+    background-size: cover;
+    background-position: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.liked-art-gradient {
+    background: linear-gradient(135deg, #450af5, #c4b5fd);
+    color: #fff;
+    text-shadow: 0 0 10px rgba(255,255,255,0.5);
+}
+
+.quick-play-title {
+    font-size: 14px;
+    font-weight: 700;
+    margin-left: 16px;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.quick-play-hover-btn {
+    position: absolute;
+    right: 16px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    opacity: 0;
+    transform: scale(0.8);
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+}
+
+.quick-play-card:hover .quick-play-hover-btn {
+    opacity: 1;
+    transform: scale(1);
+}
