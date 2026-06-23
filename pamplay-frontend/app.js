@@ -4377,6 +4377,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Render Quick Play Hub (Spotify-style 2-column grid at the top)
         renderQuickPlayHub(cardGrid);
 
+        // Render Library Section (Your Playlists) BEFORE For You
+        if (isLoggedIn) {
+            renderHomeLibrarySection(cardGrid, savedUser);
+        }
+
         // You May Like Row
         const forYouTracks = options.forYouTracks?.length ? options.forYouTracks : (feed.picks || []);
         if (forYouTracks?.length) {
@@ -4399,10 +4404,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTrackRow(cardGrid, 'Fresh picks', 'Curated for you', feed.picks, 'home_picks');
 
         renderHomeQuickActions(cardGrid);
-
-        if (isLoggedIn) {
-            renderHomeLibrarySection(cardGrid, savedUser);
-        }
     }
 
     function loadHomeForYouRow(feed) {
