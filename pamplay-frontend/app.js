@@ -4345,8 +4345,9 @@ document.addEventListener('DOMContentLoaded', () => {
         state.currentView = 'home';
         setHeaderSearchVisible(false);
         viewHeader.style.display = 'block';
-        greetingEl.style.display = 'block';
+        if (greetingEl) greetingEl.style.display = 'none';
         if (exploreHero) exploreHero.style.display = 'none';
+        if (homeHero) homeHero.style.display = 'block';
         if (categoryChips) categoryChips.style.display = 'none';
 
         const isExplore = ppRoutes().isExplorePage();
@@ -4399,9 +4400,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.classList.remove('lang-view-active');
         state.currentView = 'explore';
         setHeaderSearchVisible(false);
-        viewHeader.style.display = 'block';
-        greetingEl.style.display = 'block';
+        if (viewHeader) viewHeader.style.display = 'none';
+        if (greetingEl) greetingEl.style.display = 'none';
         if (exploreHero) exploreHero.style.display = 'flex';
+        if (homeHero) homeHero.style.display = 'none';
         if (categoryChips) categoryChips.style.display = 'flex';
         
         const savedUser = getSavedUser();
@@ -5204,6 +5206,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setHeaderSearchVisible(true);
         greetingEl.style.display = 'none';
         if (exploreHero) exploreHero.style.display = 'none';
+        if (homeHero) homeHero.style.display = 'none';
         if (categoryChips) categoryChips.style.display = 'none';
         sectionTitleEl.textContent = 'Browse All Tracks';
         cardGrid.innerHTML = '';
