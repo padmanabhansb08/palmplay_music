@@ -2506,3 +2506,19 @@ body.player-bar-hidden .player-bar {
     width: 100%;
     overflow: hidden;
 }
+
+/* ─── Card Feedback Actions Stack (Fix Overflow) ─────────────────────────── */
+.card-feedback-actions {
+    flex-direction: column !important;
+    gap: 5px !important;
+    left: 8px !important;
+    right: 8px !important;
+    bottom: 8px !important;
+    width: calc(100% - 16px) !important;
+}
+
+.card-feedback-btn {
+    width: 100% !important;
+    justify-content: center !important;
+    padding: 5px 8px !important;
+}
