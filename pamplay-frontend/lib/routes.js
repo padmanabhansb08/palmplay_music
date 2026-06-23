@@ -14,9 +14,9 @@
     const useCleanUrls = base === '/app';
 
     const pages = {
-        home: useCleanUrls ? '/app' : `${base}/home.html`,
-        explore: useCleanUrls ? '/app/explore' : `${base}/explore.html`,
-        discover: useCleanUrls ? '/app/explore#discover' : `${base}/explore.html#discover`,
+        home: useCleanUrls ? '/app#home' : `${base}/home.html#home`,
+        explore: useCleanUrls ? '/app#explore' : `${base}/home.html#explore`,
+        discover: useCleanUrls ? '/app#discover' : `${base}/home.html#discover`,
         login: useCleanUrls ? '/app/login' : `${base}/login.html`,
         signup: useCleanUrls ? '/app/signup' : `${base}/signup.html`,
         premium: useCleanUrls ? '/app/premium' : `${base}/premium.html`,
@@ -24,17 +24,31 @@
 
     function isExplorePage() {
         const p = window.location.pathname;
-        return p.includes('/explore') || p.endsWith('explore.html');
+        const h = window.location.hash;
+        return p.includes('/explore') || p.endsWith('explore.html') || h === '#explore' || h === '#discover' || h === '#search';
     }
 
     function isHomePage() {
         const p = window.location.pathname;
-        return p.endsWith('home.html') || p === '/app' || p === '/app/';
+        const h = window.location.hash;
+        return (p.endsWith('home.html') || p === '/app' || p === '/app/') && (h === '' || h === '#home');
     }
 
     function go(pageKey) {
         const url = pages[pageKey];
         if (url) {
+            const currentPath = window.location.pathname;
+            const targetUrl = new URL(url, window.location.origin);
+            const isSamePage = currentPath === targetUrl.pathname || 
+                (currentPath.endsWith('home.html') && targetUrl.pathname.endsWith('home.html')) ||
+                (currentPath === '/app' && targetUrl.pathname === '/app') ||
+                (currentPath === '/app/' && targetUrl.pathname === '/app/');
+            
+            if (isSamePage) {
+                window.location.hash = targetUrl.hash;
+                return;
+            }
+
             // Save playback state before leaving so the new page can restore it
             if (typeof window.savePalmPlaybackState === 'function') {
                 window.savePalmPlaybackState();

@@ -173,13 +173,14 @@
 
         bindBottomNav() {
             const routes = window.PalmPlayRoutes;
-            const isExplorePage = routes?.isExplorePage?.() ?? window.location.pathname.includes('explore');
-            const isHomePage = routes?.isHomePage?.() ?? window.location.pathname.includes('home');
 
             document.querySelectorAll('[data-bottom-nav]').forEach((btn) => {
                 btn.addEventListener('click', () => {
                     const key = btn.dataset.bottomNav;
                     this.activateBottomNav(key);
+
+                    const isExplorePage = routes?.isExplorePage?.() ?? window.location.pathname.includes('explore');
+                    const isHomePage = routes?.isHomePage?.() ?? window.location.pathname.includes('home');
 
                     if (key === 'home') {
                         if (!isHomePage) {

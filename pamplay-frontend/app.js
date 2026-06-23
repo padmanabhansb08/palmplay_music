@@ -603,7 +603,6 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         go(view, fromHistory = false) {
             if (!fromHistory) this.push(view);
-            const onExplore = ppRoutes().isExplorePage();
 
             // Sync sidebar active highlights
             const targetRouteKey = view === 'search' ? 'discover' : view;
@@ -618,38 +617,46 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (viewHeader) viewHeader.style.display = 'none';
                 if (exploreHero) exploreHero.style.display = 'none';
                 if (categoryChips) categoryChips.style.display = 'none';
-                greetingEl && (greetingEl.style.display = 'none');
+                if (greetingEl) greetingEl.style.display = 'none';
                 renderSearch();
                 window.PalmPlayUX?.activateBottomNav?.('discover');
 
                 // Sync URL hash
-                if (onExplore && window.location.hash !== '#discover') {
+                if (window.location.hash !== '#discover') {
                     history.replaceState(null, '', '#discover');
                 }
                 return;
             }
-            if (view === 'explore' && onExplore) {
+            if (view === 'explore') {
                 state.currentView = 'explore';
                 setHeaderSearchVisible(true);
-                if (viewHeader) viewHeader.style.display = 'block';
+                if (viewHeader) viewHeader.style.display = 'none';
                 if (exploreHero) exploreHero.style.display = 'flex';
                 if (categoryChips) categoryChips.style.display = 'flex';
-                greetingEl && (greetingEl.style.display = 'block');
+                if (greetingEl) greetingEl.style.display = 'none';
                 const chip = document.querySelector('.chip.active');
                 renderExplore(chip?.getAttribute('data-genre') || 'Trending');
                 window.PalmPlayUX?.activateBottomNav?.('explore');
 
                 // Sync URL hash
-                if (window.location.hash) {
-                    history.replaceState(null, '', window.location.pathname);
+                if (window.location.hash !== '#explore') {
+                    history.replaceState(null, '', '#explore');
                 }
                 return;
             }
             state.currentView = 'home';
-            if (!onExplore) setHeaderSearchVisible(false);
+            setHeaderSearchVisible(false);
             if (viewHeader) viewHeader.style.display = 'block';
+            if (exploreHero) exploreHero.style.display = 'none';
+            if (categoryChips) categoryChips.style.display = 'none';
+            if (greetingEl) greetingEl.style.display = 'block';
             renderHome();
             window.PalmPlayUX?.activateBottomNav?.('home');
+
+            // Sync URL hash
+            if (window.location.hash !== '#home' && window.location.hash !== '') {
+                history.replaceState(null, '', '#home');
+            }
         }
     };
 
@@ -719,13 +726,26 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function routeInitialView() {
-        if (ppRoutes().isExplorePage()) {
-            const discover = window.location.hash === '#discover';
-            if (discover) window.PalmPlayNav.go('search', true);
-            else window.PalmPlayNav.go('explore', true);
+        const hash = window.location.hash;
+        if (hash === '#discover' || hash === '#search') {
+            window.PalmPlayNav.go('search', true);
+        } else if (hash === '#explore') {
+            window.PalmPlayNav.go('explore', true);
         } else {
-            renderHome();
+            window.PalmPlayNav.go('home', true);
         }
+
+        // Listen for browser back/forward buttons
+        window.addEventListener('hashchange', () => {
+            const currentHash = window.location.hash;
+            if (currentHash === '#discover' || currentHash === '#search') {
+                if (state.currentView !== 'search') window.PalmPlayNav.go('search', true);
+            } else if (currentHash === '#explore') {
+                if (state.currentView !== 'explore') window.PalmPlayNav.go('explore', true);
+            } else {
+                if (state.currentView !== 'home') window.PalmPlayNav.go('home', true);
+            }
+        });
     }
 
     function setupMediaSession() {
@@ -1232,13 +1252,9 @@ document.addEventListener('DOMContentLoaded', () => {
         navLinks.forEach(link => {
             link.addEventListener('click', (e) => {
                 const href = link.getAttribute('href') || '';
-                const onExplorePage = ppRoutes().isExplorePage();
                 const routeKey = link.getAttribute('data-pp-route') || '';
                 const isDiscover = routeKey === 'discover' || href.includes('#discover') || link.textContent.trim().toLowerCase() === 'discover';
                 const isExploreOnly = routeKey === 'explore' || link.hasAttribute('data-nav-explore') || (link.textContent.trim().toLowerCase() === 'explore' && !href.includes('#discover'));
-
-                if ((routeKey === 'home' || href.includes('home')) && !ppRoutes().isHomePage()) return;
-                if ((routeKey === 'explore' || routeKey === 'discover' || href.includes('explore')) && !ppRoutes().isExplorePage()) return;
 
                 e.preventDefault();
                 navLinks.forEach(l => l.classList.remove('active'));
@@ -1247,12 +1263,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (isDiscover) {
                     window.PalmPlayNav.go('search');
-                } else if (isExploreOnly && onExplorePage) {
+                } else if (isExploreOnly) {
                     window.PalmPlayNav.go('explore');
-                } else if (routeKey === 'home' || href.includes('home')) {
-                    window.PalmPlayNav.go('home');
                 } else {
-                    window.PalmPlayNav.go('search');
+                    window.PalmPlayNav.go('home');
                 }
             });
         });
@@ -1263,9 +1277,8 @@ document.addEventListener('DOMContentLoaded', () => {
             filterCards(e.target.value);
         });
         searchInput.addEventListener('focus', () => {
-            if (ppRoutes().isHomePage() && state.currentView !== 'search') {
-                if (typeof window.savePalmPlaybackState === 'function') window.savePalmPlaybackState();
-                window.location.href = ppRoutes().page('discover');
+            if (state.currentView !== 'search') {
+                window.PalmPlayNav.go('search');
             }
         });
 
@@ -2406,10 +2419,10 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (q) {
             const decoded = decodeURIComponent(q);
             if (!ppRoutes().isExplorePage()) {
-                const redirectUrl = new URL(ppRoutes().page('discover'), window.location.origin);
-                redirectUrl.searchParams.set('q', decoded);
-                window.location.href = redirectUrl.toString();
-                return;
+                const newUrl = new URL(window.location.href);
+                newUrl.searchParams.set('q', decoded);
+                newUrl.hash = '#discover';
+                history.replaceState(null, '', newUrl.toString());
             }
             window.PalmPlayNav?.go('search');
             const input = document.querySelector('.premium-search-input');
