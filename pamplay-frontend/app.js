@@ -4130,22 +4130,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const card = document.createElement('div');
         card.className = 'card catalog-card';
         const art = track.art || DEFAULT_ART_URL;
-        
-        let rankHtml = '';
-        if (options.rank) {
-            rankHtml = `<div class="card-rank-badge">#${options.rank}</div>`;
-        }
-
         card.innerHTML = `
-            <div class="card-image-container">
-                <div class="card-image" style="background-image: url('${escapeHtml(art)}')"></div>
-                ${rankHtml}
-                <div class="card-info-overlay">
-                    <div class="card-title">${escapeHtml(track.name)}</div>
-                    <div class="card-desc">${buildTrackMetaLine(track)}</div>
-                </div>
+            <div class="card-image" style="background-image: url('${escapeHtml(art)}')">
                 <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
             </div>
+            <div class="card-title">${escapeHtml(track.name)}</div>
+            <div class="card-desc">${buildTrackMetaLine(track)}</div>
         `;
         card.onclick = (e) => {
             if (e.target.closest('.meta-link, .card-more-btn, .card-feedback-btn')) return;
@@ -4176,15 +4166,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const organizedTracks = organizeTracksForSelection(tracks, tracks.length);
         const grid = appendHomeSection(parent, title, subtitle);
         const plIndex = upsertTempPlaylist(playlistId, title, organizedTracks);
-        
-        const isTrending = playlistId === 'home_trending';
-        organizedTracks.forEach((track, tIdx) => {
-            const cardOpts = { ...options.cardOptions };
-            if (isTrending) {
-                cardOpts.rank = tIdx + 1;
-            }
-            grid.appendChild(createTrackCard(track, plIndex, tIdx, cardOpts));
-        });
+        organizedTracks.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx, options.cardOptions)));
     }
 
     function normalizeTitleKey(name) {
@@ -4316,14 +4298,11 @@ document.addEventListener('DOMContentLoaded', () => {
             card.className = 'card';
             const art = pl.tracks[0]?.art || DEFAULT_ART_URL;
             card.innerHTML = `
-                <div class="card-image-container">
-                    <div class="card-image" style="background-image: url('${escapeHtml(art)}')"></div>
-                    <div class="card-info-overlay">
-                        <div class="card-title">${escapeHtml(pl.name)}</div>
-                        <div class="card-desc">${pl.tracks.length} songs</div>
-                    </div>
+                <div class="card-image" style="background-image: url('${escapeHtml(art)}')">
                     <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
                 </div>
+                <div class="card-title">${escapeHtml(pl.name)}</div>
+                <div class="card-desc">${pl.tracks.length} songs</div>
             `;
             card.onclick = () => showPlaylist(index);
             grid.appendChild(card);
@@ -4518,30 +4497,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Render Quick Play Hub (Spotify-style 2-column grid at the top)
         renderQuickPlayHub(cardGrid);
-
-        // Update Cinematic Hero
-        const trendingTrack = feed.trending?.[0];
-        if (trendingTrack) {
-            const artEl = document.getElementById('hero-featured-art');
-            const blurEl = document.getElementById('hero-bg-blur');
-            const titleEl = document.getElementById('hero-welcome-title');
-            const artistEl = document.getElementById('hero-subtitle-artist');
-            const playBtn = document.getElementById('hero-play-now-btn');
-            const badge = document.getElementById('hero-time-badge');
-            
-            if (artEl) artEl.src = trendingTrack.art || DEFAULT_ART_URL;
-            if (blurEl) blurEl.style.backgroundImage = `url(${trendingTrack.art || DEFAULT_ART_URL})`;
-            if (titleEl) titleEl.textContent = trendingTrack.name;
-            if (artistEl) artistEl.textContent = trendingTrack.artist;
-            if (badge) badge.textContent = "Trending #1";
-            
-            if (playBtn) {
-                playBtn.onclick = () => {
-                    const idx = playlists.findIndex(pl => pl.id === 'home_trending');
-                    if (idx !== -1) playTrack(idx, 0);
-                };
-            }
-        }
 
         // Helper to personalize rows dynamically based on the language/similarity
         const personalize = (tracks) => filterHomeTracksByLanguage(tracks, prefLang, lastBoosted);
@@ -5217,12 +5172,45 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateHomeHeroGreeting() {
-        // Obsolete: Replaced by updateCinematicHero in paintHomeFeed
+        const badge = document.getElementById('hero-time-badge');
+        const title = document.getElementById('hero-welcome-title');
+        if (!badge) return;
+        
+        const hrs = new Date().getHours();
+        let greeting = "Good Morning";
+        let welcome = "Your Cinematic Stage";
+        if (hrs >= 12 && hrs < 17) {
+            greeting = "Good Afternoon";
+            welcome = "Unleash the Melody";
+        } else if (hrs >= 17 && hrs < 21) {
+            greeting = "Good Evening";
+            welcome = "Wind Down with Audio";
+        } else if (hrs >= 21 || hrs < 4) {
+            greeting = "Late Night Listening";
+            welcome = "Atmospheric Soundscapes";
+        }
+        
+        badge.textContent = greeting;
+        if (title) title.textContent = welcome;
     }
 
     function updateHomeHeroVisualizer() {
-        // Obsolete: Replaced by pulsing ring CSS animation on the featured art
         const vis = document.getElementById('hero-visualizer');
+        const hero = document.getElementById('home-hero');
+        const glow = document.getElementById('hero-glow-layer');
+        if (!hero) return;
+
+        if (state.currentPlaylistIndex !== -1) {
+            const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+            if (track) {
+                hero.style.background = getTrackGradients(track);
+                if (glow) glow.style.background = getTrackGlow(track);
+            }
+        } else {
+            hero.style.background = '';
+            if (glow) glow.style.background = '';
+        }
+
         if (vis) {
             if (state.isPlaying) {
                 vis.style.display = 'flex';
@@ -5351,27 +5339,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Update home hero visualizer state dynamically
         updateHomeHeroVisualizer();
-
-        // Sync Sidebar Mini Player
-        const sidebarMiniPlayer = document.getElementById('sidebar-mini-player');
-        if (sidebarMiniPlayer) {
-            sidebarMiniPlayer.style.display = 'flex';
-            const miniArt = document.getElementById('sidebar-mini-art');
-            const miniTitle = document.getElementById('sidebar-mini-title');
-            const miniArtist = document.getElementById('sidebar-mini-artist');
-            const miniPlayBtn = document.getElementById('sidebar-mini-play');
-            if (miniArt) miniArt.style.backgroundImage = `url(${track.art})`;
-            if (miniTitle) miniTitle.textContent = track.name;
-            if (miniArtist) miniArtist.textContent = track.artist;
-            if (miniPlayBtn) {
-                miniPlayBtn.innerHTML = state.isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>';
-                // Attach event listener once
-                if (!miniPlayBtn.hasAttribute('data-bound')) {
-                    miniPlayBtn.onclick = togglePlay;
-                    miniPlayBtn.setAttribute('data-bound', 'true');
-                }
-            }
-        }
 
         if (audio.duration && isFinite(audio.duration)) {
             timeTotal.textContent = formatTime(audio.duration);

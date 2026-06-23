@@ -74,16 +74,6 @@
 
             <input type="file" id="file-input" multiple accept="audio/*" style="display: none;">
             <input type="file" id="folder-input" webkitdirectory style="display: none;">
-
-            <!-- Sidebar Mini Player -->
-            <div class="sidebar-mini-player" id="sidebar-mini-player" style="display: none;">
-                <div class="mini-art" id="sidebar-mini-art"></div>
-                <div class="mini-info">
-                    <div class="mini-title" id="sidebar-mini-title">Not Playing</div>
-                    <div class="mini-artist" id="sidebar-mini-artist">-</div>
-                </div>
-                <button class="mini-play-btn" id="sidebar-mini-play"><i class="fas fa-play"></i></button>
-            </div>
         </aside>
 
         <!-- Main Content Area -->
@@ -139,26 +129,22 @@
                 </div>
 
                 <!-- Home Hero Card (initially visible) -->
-                <div id="home-hero" class="hero-section home-hero cinematic-hero">
-                    <div class="hero-bg-blur" id="hero-bg-blur"></div>
-                    <div class="hero-gradient-overlay"></div>
-                    
-                    <div class="hero-content cinematic-hero-content">
-                        <div class="hero-featured-art-container">
-                            <img id="hero-featured-art" src="" alt="Featured Art" class="hero-featured-art">
-                            <div class="pulsing-ring"></div>
-                        </div>
-                        <div class="hero-text-content">
-                            <span class="hero-badge" id="hero-time-badge">Featured</span>
-                            <h1 class="hero-title" id="hero-welcome-title">Loading...</h1>
-                            <p class="hero-subtitle" id="hero-subtitle-artist">Artist</p>
-                            
-                            <div class="hero-actions">
-                                <button class="upgrade-btn hero-btn" id="hero-play-now-btn"><i class="fas fa-play" style="margin-right:8px"></i> Play Now</button>
-                                <button class="upgrade-btn hero-btn secondary" id="hero-add-lib-btn"><i class="fas fa-plus" style="margin-right:8px"></i> Add to Library</button>
-                            </div>
+                <div id="home-hero" class="hero-section home-hero">
+                    <div class="hero-content">
+                        <span class="hero-badge" id="hero-time-badge">Good Morning</span>
+                        <h1 class="hero-title" id="hero-welcome-title">Your Cinematic Stage</h1>
+                        <p class="hero-subtitle">Elevate your listening experience. Control your symphony dynamically and explore your collection.</p>
+                        
+                        <!-- Simple visualizer wave container -->
+                        <div class="visualizer-wave-container" id="hero-visualizer" style="display: none;">
+                            <div class="wave-bar bar-1"></div>
+                            <div class="wave-bar bar-2"></div>
+                            <div class="wave-bar bar-3"></div>
+                            <div class="wave-bar bar-4"></div>
+                            <div class="wave-bar bar-5"></div>
                         </div>
                     </div>
+                    <div class="hero-glow-layer" id="hero-glow-layer"></div>
                 </div>
 
                 <div id="view-header">
