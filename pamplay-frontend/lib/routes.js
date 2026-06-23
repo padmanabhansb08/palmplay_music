@@ -24,14 +24,12 @@
 
     function isExplorePage() {
         const p = window.location.pathname;
-        const h = window.location.hash;
-        return p.includes('/explore') || p.endsWith('explore.html') || h === '#explore' || h === '#discover' || h === '#search';
+        return p.includes('/explore') || p.endsWith('explore.html');
     }
 
     function isHomePage() {
         const p = window.location.pathname;
-        const h = window.location.hash;
-        return (p.endsWith('home.html') || p === '/app' || p === '/app/') && (h === '' || h === '#home');
+        return p.endsWith('home.html') || p === '/app' || p === '/app/';
     }
 
     function go(pageKey) {

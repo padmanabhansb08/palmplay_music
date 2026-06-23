@@ -179,11 +179,11 @@
                     const key = btn.dataset.bottomNav;
                     this.activateBottomNav(key);
 
-                    const isExplorePage = routes?.isExplorePage?.() ?? window.location.pathname.includes('explore');
-                    const isHomePage = routes?.isHomePage?.() ?? window.location.pathname.includes('home');
+                    const p = window.location.pathname;
+                    const isMainAppPage = p.endsWith('home.html') || p === '/app' || p === '/app/';
 
                     if (key === 'home') {
-                        if (!isHomePage) {
+                        if (!isMainAppPage) {
                             if (typeof window.savePalmPlaybackState === 'function') window.savePalmPlaybackState();
                             window.location.href = routes?.page('home') || 'home.html';
                             return;
@@ -192,7 +192,7 @@
                         return;
                     }
                     if (key === 'explore') {
-                        if (!isExplorePage) {
+                        if (!isMainAppPage) {
                             if (typeof window.savePalmPlaybackState === 'function') window.savePalmPlaybackState();
                             window.location.href = routes?.page('explore') || 'explore.html';
                             return;
@@ -201,7 +201,7 @@
                         return;
                     }
                     if (key === 'discover') {
-                        if (!isExplorePage && !isHomePage) {
+                        if (!isMainAppPage) {
                             if (typeof window.savePalmPlaybackState === 'function') window.savePalmPlaybackState();
                             window.location.href = routes?.page('discover') || 'explore.html#discover';
                             return;
