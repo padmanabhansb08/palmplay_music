@@ -2,7 +2,14 @@
 <html lang="en">
 <!-- Default Songs Page -->
 <script>
-    window.location.replace("home.html#explore" + window.location.search);
+    (function() {
+        const p = window.location.pathname;
+        if (p.startsWith('/app')) {
+            window.location.replace('/app#explore' + window.location.search);
+        } else {
+            window.location.replace('home.html#explore' + window.location.search);
+        }
+    })();
 </script>
 
 <head>
