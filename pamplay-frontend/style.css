@@ -2450,3 +2450,59 @@ body.player-bar-hidden .player-bar {
         transform: scaleY(7);
     }
 }
+
+/* ─── Premium Music Horizontal Carousel (Home Sections) ────────────────────── */
+.home-section-grid {
+    display: flex !important;
+    overflow-x: auto !important;
+    scroll-snap-type: x mandatory !important;
+    gap: 20px !important;
+    padding: 10px 4px 16px 4px !important;
+    scroll-behavior: smooth;
+    scrollbar-width: thin !important;
+    scrollbar-color: rgba(255, 255, 255, 0.12) transparent !important;
+    width: 100%;
+}
+
+.home-section-grid::-webkit-scrollbar {
+    height: 6px;
+}
+.home-section-grid::-webkit-scrollbar-track {
+    background: transparent;
+}
+.home-section-grid::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+}
+.home-section-grid::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+
+.home-section-grid .card {
+    flex: 0 0 170px !important;
+    scroll-snap-align: start !important;
+    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s ease !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    border-radius: 8px !important;
+    overflow: hidden;
+}
+
+.home-section-grid .card:hover {
+    transform: translateY(-6px) scale(1.02) !important;
+    background: rgba(255, 255, 255, 0.07) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5), 0 0 15px rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Make sure the card grid doesn't restrict layout width */
+.home-feed {
+    width: 100%;
+    max-width: 100% !important;
+    box-sizing: border-box;
+}
+
+.home-feed .home-section {
+    width: 100%;
+    overflow: hidden;
+}
