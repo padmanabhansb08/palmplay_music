@@ -394,7 +394,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const sectionTitleEl = document.querySelector('.section-title');
     const viewHeader = document.querySelector('#view-header');
     const searchContainer = document.querySelector('.search-container');
-    const exploreHero = document.querySelector('.hero-section');
+    const exploreHero = document.querySelector('#explore-hero');
+    const homeHero = document.querySelector('#home-hero');
     const categoryChips = document.querySelector('.category-chips');
 
     // Add Music Elements
@@ -616,6 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setHeaderSearchVisible(true);
                 if (viewHeader) viewHeader.style.display = 'none';
                 if (exploreHero) exploreHero.style.display = 'none';
+                if (homeHero) homeHero.style.display = 'none';
                 if (categoryChips) categoryChips.style.display = 'none';
                 if (greetingEl) greetingEl.style.display = 'none';
                 renderSearch();
@@ -632,6 +634,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 setHeaderSearchVisible(true);
                 if (viewHeader) viewHeader.style.display = 'none';
                 if (exploreHero) exploreHero.style.display = 'flex';
+                if (homeHero) homeHero.style.display = 'none';
                 if (categoryChips) categoryChips.style.display = 'flex';
                 if (greetingEl) greetingEl.style.display = 'none';
                 const chip = document.querySelector('.chip.active');
@@ -648,8 +651,11 @@ document.addEventListener('DOMContentLoaded', () => {
             setHeaderSearchVisible(false);
             if (viewHeader) viewHeader.style.display = 'block';
             if (exploreHero) exploreHero.style.display = 'none';
+            if (homeHero) homeHero.style.display = 'block';
             if (categoryChips) categoryChips.style.display = 'none';
             if (greetingEl) greetingEl.style.display = 'block';
+            updateHomeHeroGreeting();
+            updateHomeHeroVisualizer();
             renderHome();
             window.PalmPlayUX?.activateBottomNav?.('home');
 
@@ -4929,6 +4935,80 @@ document.addEventListener('DOMContentLoaded', () => {
         volumeFill.style.width = `${state.volume * 100}%`;
     }
 
+    function updateHomeHeroGreeting() {
+        const badge = document.getElementById('hero-time-badge');
+        const title = document.getElementById('hero-welcome-title');
+        if (!badge) return;
+        
+        const hrs = new Date().getHours();
+        let greeting = "Good Morning";
+        let welcome = "Your Cinematic Stage";
+        if (hrs >= 12 && hrs < 17) {
+            greeting = "Good Afternoon";
+            welcome = "Unleash the Melody";
+        } else if (hrs >= 17 && hrs < 21) {
+            greeting = "Good Evening";
+            welcome = "Wind Down with Audio";
+        } else if (hrs >= 21 || hrs < 4) {
+            greeting = "Late Night Listening";
+            welcome = "Atmospheric Soundscapes";
+        }
+        
+        badge.textContent = greeting;
+        if (title) title.textContent = welcome;
+    }
+
+    function updateHomeHeroVisualizer() {
+        const vis = document.getElementById('hero-visualizer');
+        const hero = document.getElementById('home-hero');
+        const glow = document.getElementById('hero-glow-layer');
+        if (!hero) return;
+
+        if (state.currentPlaylistIndex !== -1) {
+            const track = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+            if (track) {
+                hero.style.background = getTrackGradients(track);
+                if (glow) glow.style.background = getTrackGlow(track);
+            }
+        } else {
+            hero.style.background = '';
+            if (glow) glow.style.background = '';
+        }
+
+        if (vis) {
+            if (state.isPlaying) {
+                vis.style.display = 'flex';
+                vis.classList.add('playing');
+            } else {
+                vis.classList.remove('playing');
+                vis.style.display = 'none';
+            }
+        }
+    }
+
+    function getTrackGradients(track) {
+        if (!track) return 'linear-gradient(135deg, rgba(30, 10, 10, 0.4) 0%, rgba(10, 10, 30, 0.6) 100%)';
+        const str = (track.artist || '') + (track.name || '');
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const h1 = Math.abs(hash % 360);
+        const h2 = (h1 + 120) % 360;
+        return `linear-gradient(135deg, hsla(${h1}, 60%, 12%, 0.45) 0%, hsla(${h2}, 60%, 8%, 0.6) 100%)`;
+    }
+
+    function getTrackGlow(track) {
+        if (!track) return 'radial-gradient(circle at 30% 30%, rgba(255, 0, 0, 0.15) 0%, transparent 60%)';
+        const str = (track.artist || '') + (track.name || '');
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const h = Math.abs(hash % 360);
+        return `radial-gradient(circle at 30% 30%, hsla(${h}, 75%, 45%, 0.22) 0%, transparent 65%)`;
+    }
+
     function updatePlayerUI() {
         // Update user profile from registration
         const savedUser = getSavedUser();
@@ -5020,6 +5100,9 @@ document.addEventListener('DOMContentLoaded', () => {
             playIcon.className = state.isPlaying ? 'fas fa-pause' : 'fas fa-play';
         }
         document.body.classList.toggle('player-playing', state.isPlaying);
+
+        // Update home hero visualizer state dynamically
+        updateHomeHeroVisualizer();
 
         if (audio.duration && isFinite(audio.duration)) {
             timeTotal.textContent = formatTime(audio.duration);

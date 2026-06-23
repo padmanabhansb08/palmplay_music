@@ -128,8 +128,27 @@
                     <button class="chip" data-genre="Party">Party</button>
                 </div>
 
+                <!-- Home Hero Card (initially visible) -->
+                <div id="home-hero" class="hero-section home-hero">
+                    <div class="hero-content">
+                        <span class="hero-badge" id="hero-time-badge">Good Morning</span>
+                        <h1 class="hero-title" id="hero-welcome-title">Your Cinematic Stage</h1>
+                        <p class="hero-subtitle">Elevate your listening experience. Control your symphony dynamically and explore your collection.</p>
+                        
+                        <!-- Simple visualizer wave container -->
+                        <div class="visualizer-wave-container" id="hero-visualizer" style="display: none;">
+                            <div class="wave-bar bar-1"></div>
+                            <div class="wave-bar bar-2"></div>
+                            <div class="wave-bar bar-3"></div>
+                            <div class="wave-bar bar-4"></div>
+                            <div class="wave-bar bar-5"></div>
+                        </div>
+                    </div>
+                    <div class="hero-glow-layer" id="hero-glow-layer"></div>
+                </div>
+
                 <div id="view-header">
-                    <h2 class="greeting">Good Morning</h2>
+                    <h2 class="greeting" style="display: none;">Good Morning</h2>
                     <div class="section-header">
                         <h3 class="section-title">Your Collection</h3>
                     </div>
