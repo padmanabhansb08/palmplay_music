@@ -2519,10 +2519,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return {
                 dislikeTracks: Array.isArray(parsed.dislikeTracks) ? parsed.dislikeTracks.slice(0, 200) : [],
                 boostTracks: Array.isArray(parsed.boostTracks) ? parsed.boostTracks.slice(0, 200) : [],
-                boostArtists: Array.isArray(parsed.boostArtists) ? parsed.boostArtists.slice(0, 120) : []
+                boostArtists: Array.isArray(parsed.boostArtists) ? parsed.boostArtists.slice(0, 120) : [],
+                preferredLanguage: parsed.preferredLanguage || '',
+                lastBoostedTrack: parsed.lastBoostedTrack || null
             };
         } catch {
-            return { dislikeTracks: [], boostTracks: [], boostArtists: [] };
+            return { dislikeTracks: [], boostTracks: [], boostArtists: [], preferredLanguage: '', lastBoostedTrack: null };
         }
     }
 
@@ -2572,16 +2574,78 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function scoreForYouTrack(track, profile, feedback) {
         const tKey = getTrackIdentity(track);
-        if (feedback.dislikeTracks.includes(tKey)) return -99999;
+        // Completely exclude disliked tracks
+        if (feedback.dislikeTracks && feedback.dislikeTracks.includes(tKey)) return -99999;
+        
         const aKey = primaryArtistKey(track.artist);
+        // Penalize disliked artists: if they have disliked multiple tracks from them, completely block them
+        let dislikeCount = 0;
+        if (feedback.dislikeTracks) {
+            feedback.dislikeTracks.forEach((dt) => {
+                if (dt.split('::')[1] === aKey) dislikeCount++;
+            });
+        }
+        if (dislikeCount >= 2) return -99999; // Completely block artist on multiple dislikes
+        if (dislikeCount === 1) return -200; // Heavy penalty for single dislike
+
         const langKey = normalizeSearchText(track.language || '');
+        const prefLang = feedback.preferredLanguage ? normalizeSearchText(feedback.preferredLanguage) : '';
+        
         let score = 0;
-        score += (profile.trackScores.get(tKey) || 0) * 3.2;
-        score += (profile.artistScores.get(aKey) || 0) * 2.1;
-        score += (profile.languageScores.get(langKey) || 0) * 1.2;
-        score += Math.min(20, Math.log10((track.plays || 0) + 10) * 3.5);
-        if (feedback.boostTracks.includes(tKey)) score += 32;
-        if (feedback.boostArtists.includes(aKey)) score += 20;
+        
+        // 1. Language Affinity (Huge priority!)
+        if (prefLang && langKey === prefLang) {
+            score += 200; // Massively prioritize preferred language
+        } else if (profile.languageScores && profile.languageScores.get(langKey)) {
+            score += profile.languageScores.get(langKey) * 20;
+        }
+
+        // 2. Track & Artist History Affinity
+        if (profile.trackScores && profile.trackScores.get(tKey)) {
+            score += profile.trackScores.get(tKey) * 15;
+        }
+        if (profile.artistScores && profile.artistScores.get(aKey)) {
+            score += profile.artistScores.get(aKey) * 10;
+        }
+
+        // 3. Explicit Positive Feedback (Boosts)
+        if (feedback.boostTracks && feedback.boostTracks.includes(tKey)) {
+            score += 100;
+        }
+        if (feedback.boostArtists && feedback.boostArtists.includes(aKey)) {
+            score += 60;
+        }
+        
+        // 4. Similarity to last boosted track
+        if (feedback.lastBoostedTrack) {
+            const lastBoosted = feedback.lastBoostedTrack;
+            // Same artist boost
+            if (aKey === primaryArtistKey(lastBoosted.artist)) {
+                score += 100;
+            }
+            // Same genre/tags boost (if tags exist)
+            if (track.genre && lastBoosted.genre && track.genre.toLowerCase() === lastBoosted.genre.toLowerCase()) {
+                score += 60;
+            }
+        }
+
+        // 5. Popularity & Metadata
+        const plays = track.plays || 0;
+        score += Math.min(30, Math.log10(plays + 1) * 5);
+
+        // 6. Serendipity / Discovery Bonus (prevents filter bubbles with stable pseudo-random boost)
+        const inHistory = profile.trackScores && profile.trackScores.has(tKey);
+        if (!inHistory) {
+            // Stable hash based on track name to ensure suggestions have some variety
+            let hash = 0;
+            const str = track.name || '';
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const pseudoRandomBoost = 5 + (Math.abs(hash) % 11); // 5 to 15 points
+            score += pseudoRandomBoost;
+        }
+
         return score;
     }
 
@@ -2644,11 +2708,26 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('We will recommend more like this', 'fa-thumbs-up');
         }
 
-        savePersonalFeedback({
+        const feedbackData = {
+            ...data,
             dislikeTracks: Array.from(dislike).slice(-200),
             boostTracks: Array.from(boostTracks).slice(-200),
             boostArtists: Array.from(boostArtists).slice(-120)
-        });
+        };
+
+        if (mode !== 'hide') {
+            if (track.language) {
+                feedbackData.preferredLanguage = track.language;
+            }
+            feedbackData.lastBoostedTrack = {
+                name: track.name,
+                artist: track.artist,
+                language: track.language || '',
+                genre: track.genre || ''
+            };
+        }
+
+        savePersonalFeedback(feedbackData);
 
         if (state.currentView === 'home') renderHome();
     }
@@ -4365,10 +4444,52 @@ document.addEventListener('DOMContentLoaded', () => {
         parent.appendChild(container);
     }
 
+    function filterHomeTracksByLanguage(tracks, preferredLanguage, boostedTrack) {
+        if (!tracks?.length) return [];
+        if (!preferredLanguage) return tracks;
+        
+        const normPref = preferredLanguage.toLowerCase();
+        
+        // Return tracks sorted to prioritize the preferred language and similar songs/artists
+        return tracks.slice().sort((a, b) => {
+            const aLang = (a.language || '').toLowerCase();
+            const bLang = (b.language || '').toLowerCase();
+            
+            const aMatch = aLang === normPref ? 1 : 0;
+            const bMatch = bLang === normPref ? 1 : 0;
+            
+            if (aMatch !== bMatch) {
+                return bMatch - aMatch; // Matches preferred language first
+            }
+            
+            // If languages both match or don't match, check similarity to the last boosted track
+            if (boostedTrack) {
+                const aArtistMatch = primaryArtistKey(a.artist) === primaryArtistKey(boostedTrack.artist) ? 1 : 0;
+                const bArtistMatch = primaryArtistKey(b.artist) === primaryArtistKey(boostedTrack.artist) ? 1 : 0;
+                
+                if (aArtistMatch !== bArtistMatch) {
+                    return bArtistMatch - aArtistMatch; // Same artist first
+                }
+                
+                const aGenreMatch = a.genre && boostedTrack.genre && a.genre.toLowerCase() === boostedTrack.genre.toLowerCase() ? 1 : 0;
+                const bGenreMatch = b.genre && boostedTrack.genre && b.genre.toLowerCase() === boostedTrack.genre.toLowerCase() ? 1 : 0;
+                
+                if (aGenreMatch !== bGenreMatch) {
+                    return bGenreMatch - aGenreMatch; // Same genre first
+                }
+            }
+            
+            return 0;
+        });
+    }
+
     function paintHomeFeed(feed, options = {}) {
         const savedUser = getSavedUser();
         const isLoggedIn = isUserLoggedIn();
         const history = getPlayHistory().slice(0, 12);
+        const feedback = loadPersonalFeedback();
+        const prefLang = feedback.preferredLanguage;
+        const lastBoosted = feedback.lastBoostedTrack;
 
         cardGrid.innerHTML = '';
 
@@ -4376,6 +4497,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Render Quick Play Hub (Spotify-style 2-column grid at the top)
         renderQuickPlayHub(cardGrid);
+
+        // Helper to personalize rows dynamically based on the language/similarity
+        const personalize = (tracks) => filterHomeTracksByLanguage(tracks, prefLang, lastBoosted);
 
         // Render Library Section (Your Playlists) BEFORE For You
         if (isLoggedIn) {
@@ -4389,7 +4513,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 cardGrid,
                 'You may like',
                 'Recommended according to your tastes',
-                forYouTracks,
+                personalize(forYouTracks),
                 'home_for_you',
                 { cardOptions: { showFeedback: true } }
             );
@@ -4397,11 +4521,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Recently Played Row (Continue listening)
         if (history.length) {
-            renderTrackRow(cardGrid, 'Recently listened', 'Pick up where you left off', history, 'home_continue');
+            renderTrackRow(cardGrid, 'Recently listened', 'Pick up where you left off', personalize(history), 'home_continue');
         }
 
-        renderTrackRow(cardGrid, 'Trending now', 'Popular on PalmPlay', feed.trending, 'home_trending');
-        renderTrackRow(cardGrid, 'Fresh picks', 'Curated for you', feed.picks, 'home_picks');
+        renderTrackRow(cardGrid, 'Trending now', 'Popular on PalmPlay', personalize(feed.trending), 'home_trending');
+        renderTrackRow(cardGrid, 'Fresh picks', 'Curated for you', personalize(feed.picks), 'home_picks');
 
         renderHomeQuickActions(cardGrid);
     }
@@ -4411,8 +4535,22 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchForYouTracks(feed, history)
             .then((forYouTracks) => {
                 if (state.currentView !== 'home' || !forYouTracks?.length) return;
+                
+                const organizedTracks = organizeTracksForSelection(forYouTracks, forYouTracks.length);
+                const plIndex = upsertTempPlaylist('home_for_you', 'For you', organizedTracks);
+                
                 const existing = cardGrid.querySelector('[data-home-section="for-you"]');
-                if (existing) return;
+                if (existing) {
+                    const grid = existing.querySelector('.home-section-grid');
+                    if (grid) {
+                        grid.innerHTML = '';
+                        organizedTracks.forEach((track, tIdx) => {
+                            grid.appendChild(createTrackCard(track, plIndex, tIdx, { showFeedback: true }));
+                        });
+                    }
+                    return;
+                }
+
                 const section = document.createElement('section');
                 section.className = 'home-section';
                 section.setAttribute('data-home-section', 'for-you');
@@ -4426,8 +4564,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="home-section-grid card-grid"></div>
                 `;
                 const grid = section.querySelector('.home-section-grid');
-                const organizedTracks = organizeTracksForSelection(forYouTracks, forYouTracks.length);
-                const plIndex = upsertTempPlaylist('home_for_you', 'For you', organizedTracks);
                 organizedTracks.forEach((track, tIdx) => {
                     grid.appendChild(createTrackCard(track, plIndex, tIdx, { showFeedback: true }));
                 });
