@@ -1,5 +1,5 @@
 /* PalmPlay service worker — offline app shell (streaming stays network-only) */
-const CACHE_NAME = 'palmplay-shell-v3';
+const CACHE_NAME = 'palmplay-shell-v4';
 
 const PRECACHE = [
     './home.html',
