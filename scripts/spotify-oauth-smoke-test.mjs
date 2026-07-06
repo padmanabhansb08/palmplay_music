@@ -44,7 +44,7 @@ async function main() {
             sessionStorage.setItem('palmplay_spotify_pkce_state', stateToken);
             sessionStorage.setItem('palmplay_spotify_pkce_verifier', verifier);
             sessionStorage.setItem('palmplay_spotify_auto_import', '1');
-            const clientId = 'c6177a0758d04a8582e59cd86bd18fbf';
+            const clientId = 'c6177a0759d04a8582e59cd86bd18fbf';
             const params = new URLSearchParams({
                 client_id: clientId,
                 response_type: 'code',
