@@ -744,6 +744,28 @@ document.addEventListener('DOMContentLoaded', () => {
         setupMediaSession();
         setupEventListeners();
         setupKeyboardShortcuts();
+
+        let spotifyHandled = false;
+        try {
+            spotifyHandled = await handleSpotifyOAuthCallback();
+            if (spotifyHandled && sessionStorage.getItem(SPOTIFY_AUTO_IMPORT_KEY) === '1') {
+                sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
+                let token = null;
+                try {
+                    token = await getValidSpotifyAccessToken();
+                } catch (e) {
+                    console.warn('Spotify token unavailable after callback', e);
+                }
+                if (token) {
+                    await importSpotifyLibraryToPalmPlay();
+                } else {
+                    showToast('Spotify connection incomplete. Please reconnect once.', 'fa-exclamation-triangle');
+                }
+            }
+        } catch (e) {
+            console.warn('Spotify callback handling failed', e);
+        }
+
         if (window.PalmPlayAuth) await window.PalmPlayAuth.init();
         const user = getSavedUser();
         const uid = getUserId(user);
@@ -760,27 +782,8 @@ document.addEventListener('DOMContentLoaded', () => {
             currentSource.gain.gain.setValueAtTime(state.isMuted ? 0 : state.volume, audioCtx.currentTime);
         }
         updatePlayerUI();
+
         routeInitialView();
-        let spotifyHandled = false;
-        try {
-            spotifyHandled = await handleSpotifyOAuthCallback();
-            if (spotifyHandled && sessionStorage.getItem(SPOTIFY_AUTO_IMPORT_KEY) === '1') {
-                sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
-                let token = null;
-                try {
-                    token = await getValidSpotifyAccessToken();
-                } catch (e) {
-                    console.warn('Spotify token unavailable after callback', e);
-                }
-                if (token) {
-                    await importSpotifyLibraryToPalmPlay();
-                } else {
-                    showToast('Spotify connection incomplete. Please reconnect.', 'fa-exclamation-triangle');
-                }
-            }
-        } catch (e) {
-            console.warn('Spotify callback handling failed', e);
-        }
         const params = new URLSearchParams(window.location.search);
         if (params.get('q') && ppRoutes().isExplorePage()) {
             const q = decodeURIComponent(params.get('q'));
@@ -1564,6 +1567,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const SPOTIFY_PKCE_STATE_KEY = 'palmplay_spotify_pkce_state';
     const SPOTIFY_PKCE_VERIFIER_KEY = 'palmplay_spotify_pkce_verifier';
     const SPOTIFY_PKCE_CACHE_KEY = 'palmplay_spotify_pkce_cache_v1';
+    const SPOTIFY_REDIRECT_URI_KEY = 'palmplay_spotify_redirect_uri_v1';
     const SPOTIFY_AUTO_IMPORT_KEY = 'palmplay_spotify_auto_import';
     const SPOTIFY_FORBIDDEN_RETRY_KEY = 'palmplay_spotify_forbidden_retry';
     const SPOTIFY_SCOPES = [
@@ -2864,8 +2868,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getSpotifyRedirectUri() {
-        const homePath = ppRoutes()?.page?.('home') || '/pamplay-frontend/home.html';
-        return `${location.origin}${homePath}`;
+        const origin = location.origin;
+        const path = location.pathname || '';
+        if (path === '/app' || path.startsWith('/app/')) {
+            return `${origin}/app`;
+        }
+        if (origin.includes('palmplay-music.vercel.app')) {
+            return `${origin}/app`;
+        }
+        return `${origin}/pamplay-frontend/home.html`;
+    }
+
+    function getSpotifyRedirectUriForExchange() {
+        try {
+            const saved = localStorage.getItem(SPOTIFY_REDIRECT_URI_KEY);
+            if (saved) return saved;
+        } catch {
+            // ignore
+        }
+        return getSpotifyRedirectUri();
     }
 
     function loadSpotifyTokens() {
@@ -2879,13 +2900,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function saveSpotifyPkceSession(stateToken, verifier) {
+    function saveSpotifyPkceSession(stateToken, verifier, autoImport = true) {
         sessionStorage.setItem(SPOTIFY_PKCE_STATE_KEY, stateToken);
         sessionStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, verifier);
+        sessionStorage.setItem(SPOTIFY_AUTO_IMPORT_KEY, autoImport ? '1' : '0');
         try {
             localStorage.setItem(SPOTIFY_PKCE_CACHE_KEY, JSON.stringify({
                 state: stateToken,
                 verifier,
+                autoImport: !!autoImport,
                 createdAt: Date.now()
             }));
         } catch (e) {
@@ -2896,7 +2919,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadSpotifyPkceSession() {
         let state = sessionStorage.getItem(SPOTIFY_PKCE_STATE_KEY);
         let verifier = sessionStorage.getItem(SPOTIFY_PKCE_VERIFIER_KEY);
-        if (state && verifier) return { state, verifier };
+        if (state && verifier) {
+            return { state, verifier, autoImport: sessionStorage.getItem(SPOTIFY_AUTO_IMPORT_KEY) === '1' };
+        }
         try {
             const raw = localStorage.getItem(SPOTIFY_PKCE_CACHE_KEY);
             const parsed = raw ? JSON.parse(raw) : null;
@@ -2906,7 +2931,8 @@ document.addEventListener('DOMContentLoaded', () => {
             verifier = parsed.verifier;
             sessionStorage.setItem(SPOTIFY_PKCE_STATE_KEY, state);
             sessionStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, verifier);
-            return { state, verifier };
+            sessionStorage.setItem(SPOTIFY_AUTO_IMPORT_KEY, parsed.autoImport ? '1' : '0');
+            return { state, verifier, autoImport: !!parsed.autoImport };
         } catch {
             return null;
         }
@@ -2960,12 +2986,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const verifier = randomToken(96);
         const stateToken = randomToken(24);
         const challenge = await pkceChallenge(verifier);
-        saveSpotifyPkceSession(stateToken, verifier);
-        sessionStorage.setItem(SPOTIFY_AUTO_IMPORT_KEY, autoImport ? '1' : '0');
+        const redirectUri = getSpotifyRedirectUri();
+        try {
+            localStorage.setItem(SPOTIFY_REDIRECT_URI_KEY, redirectUri);
+        } catch (e) {
+            console.warn('Spotify redirect URI save failed', e);
+        }
+        saveSpotifyPkceSession(stateToken, verifier, autoImport);
         const params = new URLSearchParams({
             client_id: SPOTIFY_CLIENT_ID,
             response_type: 'code',
-            redirect_uri: getSpotifyRedirectUri(),
+            redirect_uri: redirectUri,
             code_challenge_method: 'S256',
             code_challenge: challenge,
             scope: SPOTIFY_SCOPES,
@@ -2982,11 +3013,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const error = params.get('error');
         if (!code && !error) return false;
 
+        const clearOAuthQuery = () => {
+            history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+        };
+
         if (error) {
             showToast(`Spotify auth failed: ${error}`, 'fa-exclamation-triangle');
             clearSpotifyPkceSession();
+            sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
             sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
-            history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+            clearOAuthQuery();
             return true;
         }
 
@@ -2994,18 +3030,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const expectedState = pkce?.state || '';
         const verifier = pkce?.verifier || '';
         if (!expectedState || !verifier || returnedState !== expectedState) {
-            showToast('Spotify login session expired. Try again.', 'fa-exclamation-triangle');
+            showToast('Spotify login session expired. Tap Connect once more.', 'fa-exclamation-triangle');
             clearSpotifyPkceSession();
+            sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
             sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
-            history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+            clearOAuthQuery();
             return true;
         }
 
+        const redirectUri = getSpotifyRedirectUriForExchange();
         const tokenParams = new URLSearchParams({
             client_id: SPOTIFY_CLIENT_ID,
             grant_type: 'authorization_code',
             code,
-            redirect_uri: getSpotifyRedirectUri(),
+            redirect_uri: redirectUri,
             code_verifier: verifier
         });
         const res = await fetch('https://accounts.spotify.com/api/token', {
@@ -3014,16 +3052,28 @@ document.addEventListener('DOMContentLoaded', () => {
             body: tokenParams.toString()
         });
         if (!res.ok) {
-            showToast('Spotify connection failed', 'fa-exclamation-triangle');
-            history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
+            let detail = 'Spotify connection failed';
+            try {
+                const body = await res.json();
+                if (body?.error_description) detail = body.error_description;
+                else if (body?.error) detail = String(body.error);
+            } catch {
+                // ignore
+            }
+            console.warn('Spotify token exchange failed', detail, { redirectUri });
+            showToast(detail, 'fa-exclamation-triangle');
+            clearSpotifyPkceSession();
+            sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
+            clearOAuthQuery();
             return true;
         }
         const payload = await res.json();
         saveSpotifyTokens(payload);
         clearSpotifyPkceSession();
         sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
+        if (pkce?.autoImport) sessionStorage.setItem(SPOTIFY_AUTO_IMPORT_KEY, '1');
+        clearOAuthQuery();
         showToast('Spotify connected', 'fa-check-circle');
-        history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
         return true;
     }
 
@@ -3033,13 +3083,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function trySpotifyReconnectOnForbidden() {
-        localStorage.removeItem(SPOTIFY_TOKEN_KEY);
-        const hasRetried = sessionStorage.getItem(SPOTIFY_FORBIDDEN_RETRY_KEY) === '1';
-        if (hasRetried) return false;
-        sessionStorage.setItem(SPOTIFY_FORBIDDEN_RETRY_KEY, '1');
-        showToast('Refreshing Spotify connection...', 'fa-sync');
-        await startSpotifyConnect(true, true);
-        return true;
+        // Never auto-redirect to Spotify again in the same session — that caused Agree loops.
+        return false;
     }
 
     async function spotifyApiGet(path) {
@@ -3328,8 +3373,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('Spotify token check failed before import', err);
         }
         if (!token) {
-            await startSpotifyConnect(true, true);
-            return { started: true, oauthRedirected: true, reason: 'spotify_not_connected' };
+            return { started: false, reason: 'spotify_not_connected' };
         }
         showTransferProgressModal();
         updateTransferProgress('Connecting Spotify...', 'Authorizing and preparing your library import.', 6);
@@ -3377,10 +3421,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (needsSpotifyReconnect && !likedEntries.length && !playlistsMeta.length) {
-            const redirected = await trySpotifyReconnectOnForbidden();
-            if (redirected) {
-                return { started: true, oauthRedirected: true, blocked403: true, added: 0, misses: 0, playlists: 0 };
-            }
+            showToast('Spotify access denied. Add your account in Spotify Developer Users and Access.', 'fa-exclamation-triangle');
+            finishTransferProgress({
+                added: 0,
+                misses: 0,
+                playlists: 0,
+                plIndex: -1,
+                logs: transferLogs
+            });
+            return { started: true, blocked403: true, added: 0, misses: 0, playlists: 0 };
         }
 
         if (likedEntries.length) {
@@ -3651,6 +3700,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const token = await getValidSpotifyAccessToken();
                 if (token) {
                     const result = await importSpotifyLibraryToPalmPlay();
+                    if (result?.reason === 'spotify_not_connected') {
+                        resetButton();
+                        showToast('Spotify not connected. Tap the button again to authorize.', 'fa-exclamation-triangle');
+                        return;
+                    }
                     if (result?.oauthRedirected) return;
                     if (result?.blocked403 && (result?.added || 0) === 0) {
                         resetButton();
@@ -3659,7 +3713,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     container.style.display = 'none';
                 } else {
-                    await startSpotifyConnect(true, true);
+                    await startSpotifyConnect(true, false);
                     return;
                 }
             } catch (err) {
