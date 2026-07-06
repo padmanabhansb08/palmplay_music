@@ -60,6 +60,26 @@ body {
     height: 100vh;
     /* Smooth dynamic theme color transitions */
     transition: background-color 1.5s ease;
+    /* CRITICAL: ensure body is never white during page nav */
+    background: #000000;
+}
+
+/* Page fade-in on load */
+@keyframes pp-fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+#app {
+    animation: pp-fade-in 0.25s ease forwards;
+}
+
+/* Page fade-out class — added by routes.js before navigation */
+body.page-leaving #app {
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none;
 }
 
 /* Dynamic theme: smooth color morphing on all primary-colored elements */

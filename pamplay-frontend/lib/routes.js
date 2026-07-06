@@ -67,7 +67,10 @@
         const url = pages[pageKey];
         if (!url) return;
         savePlaybackState();
-        window.location.href = url;
+        document.body.classList.add('page-leaving');
+        setTimeout(() => {
+            window.location.href = url;
+        }, 150);
     }
 
     function applyLinkRoutes() {
@@ -89,8 +92,12 @@
             (href.startsWith('/app') && !href.includes('login') &&
              !href.includes('signup') && !href.includes('premium'));
         if (isInternal) {
+            e.preventDefault();
             savePlaybackState();
-            // Let the browser do the actual navigation normally
+            document.body.classList.add('page-leaving');
+            setTimeout(() => {
+                window.location.href = anchor.href || href;
+            }, 150);
         }
     }, true);
 
