@@ -5837,4 +5837,81 @@ document.addEventListener('DOMContentLoaded', () => {
 
     init();
     initAtmosphere();
+
+    // ─── Seamless Cross-Page Playback Resume ───────────────────────────────────
+    // If the user navigated from another page (home ↔ explore), restore the
+    // audio stream and player UI so music never stops between pages.
+    (function restorePlaybackAfterNav() {
+        const PLAYBACK_KEY = 'pp_playback_state';
+        let saved;
+        try {
+            const raw = sessionStorage.getItem(PLAYBACK_KEY);
+            saved = raw ? JSON.parse(raw) : null;
+        } catch (e) { saved = null; }
+
+        if (!saved || !saved.src || !saved.trackName) return;
+
+        // Only restore if saved within the last 30 seconds (i.e. just navigated)
+        if (Date.now() - saved.savedAt > 30000) {
+            sessionStorage.removeItem(PLAYBACK_KEY);
+            return;
+        }
+
+        // Clear so it doesn't restore again on next load
+        sessionStorage.removeItem(PLAYBACK_KEY);
+
+        // Restore player bar UI immediately (no async needed)
+        if (trackNameEl) trackNameEl.textContent = saved.trackName;
+        if (artistNameEl) artistNameEl.textContent = saved.artistName;
+        if (albumArtEl && saved.albumArtBg) albumArtEl.style.backgroundImage = saved.albumArtBg;
+        document.body.classList.remove('player-bar-hidden');
+
+        // Restore audio and resume playing
+        const wasPlaying = !saved.paused;
+        audio.src = saved.src;
+        audio.currentTime = saved.currentTime || 0;
+        audio.volume = saved.volume ?? 0.7;
+        setMasterVolume(audio.volume);
+        audio.playbackRate = state.playbackSpeed;
+
+        audio.load();
+
+        if (wasPlaying) {
+            // Autoplay requires a gesture — attempt silently; if blocked, show play button
+            const resumeAttempt = audio.play();
+            if (resumeAttempt !== undefined) {
+                resumeAttempt.then(() => {
+                    state.isPlaying = true;
+                    state.isBuffering = false;
+                    updatePlayerUI();
+                    showToast('▶ Resumed — ' + saved.trackName, 'fa-music');
+                }).catch(() => {
+                    // Browser blocked autoplay — keep paused, show play button
+                    state.isPlaying = false;
+                    state.isBuffering = false;
+                    updatePlayerUI();
+                });
+            }
+        } else {
+            state.isPlaying = false;
+            state.isBuffering = false;
+            updatePlayerUI();
+        }
+
+        // Also seed the hero banner with this restored art
+        const heroBlurEl = document.getElementById('home-hero-blur');
+        const heroArtEl = document.getElementById('home-hero-art');
+        if (heroBlurEl && saved.albumArtBg) {
+            heroBlurEl.style.backgroundImage = saved.albumArtBg;
+            heroBlurEl.style.filter = 'blur(40px) saturate(180%)';
+            heroBlurEl.style.opacity = '0.7';
+            heroBlurEl.style.transform = 'scale(1.15)';
+        }
+        if (heroArtEl && saved.albumArtBg) {
+            heroArtEl.style.backgroundImage = saved.albumArtBg;
+            heroArtEl.style.display = 'block';
+        }
+    })();
+    // ──────────────────────────────────────────────────────────────────────────
 });
+
