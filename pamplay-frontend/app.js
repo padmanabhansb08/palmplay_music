@@ -351,10 +351,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const localTracksList = document.querySelector('#local-tracks-list');
     const greetingEl = document.querySelector('.greeting');
     const sectionTitleEl = document.querySelector('.section-title');
-    const viewHeader = document.querySelector('#view-header');
+    const viewHeader = document.querySelector('#view-header') || document.querySelector('.greeting');
     const searchContainer = document.querySelector('.search-container');
     const exploreHero = document.querySelector('.hero-section');
     const categoryChips = document.querySelector('.category-chips');
+    const heroArt = document.getElementById('home-hero-art');
+    const heroBlur = document.getElementById('home-hero-blur');
 
     // Add Music Elements
     const addMusicBtn = document.querySelector('#add-music-btn');

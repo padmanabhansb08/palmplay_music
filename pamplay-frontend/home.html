@@ -102,16 +102,31 @@
                 </div>
             </header>
 
-            <section class="content-wrapper">
-                <div id="view-header">
-                    <h2 class="greeting">Good Morning</h2>
-                    <div class="section-header">
-                        <h3 class="section-title">Your Collection</h3>
+            <!-- HERO BANNER -->
+            <div class="home-hero" id="home-hero">
+                <div class="home-hero-blur" id="home-hero-blur"></div>
+                <div class="home-hero-noise"></div>
+                <div class="home-hero-content">
+                    <div class="home-hero-text">
+                        <span class="home-hero-label">🎧 Your Vibe</span>
+                        <h2 class="greeting" id="view-header">Good Evening</h2>
+                        <p class="home-hero-sub">Music that moves with you.</p>
                     </div>
+                    <div class="home-hero-art" id="home-hero-art"></div>
                 </div>
+                <!-- Quick-access chips -->
+                <div class="home-chips-row" id="home-chips-row">
+                    <button class="home-chip home-chip--active" data-chip="all"><i class="fas fa-bolt"></i> All</button>
+                    <button class="home-chip" data-chip="recent"><i class="fas fa-clock"></i> Recent</button>
+                    <button class="home-chip" data-chip="liked"><i class="fas fa-heart"></i> Liked</button>
+                    <button class="home-chip" data-chip="local"><i class="fas fa-folder-open"></i> Local</button>
+                    <button class="home-chip" data-chip="explore" onclick="window.PalmPlayRoutes && window.PalmPlayRoutes.go('explore')"><i class="fas fa-compass"></i> Explore</button>
+                </div>
+            </div>
 
+            <section class="content-wrapper">
                 <div id="main-content">
-                    <div class="card-grid">
+                    <div class="card-grid home-feed">
                         <!-- Content injected by app.js -->
                     </div>
                 </div>

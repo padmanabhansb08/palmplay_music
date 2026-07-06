@@ -2220,3 +2220,427 @@ body.player-bar-hidden .player-bar {
         display: none !important;
     }
 }
+
+/* ============================================
+   🔥 GEN Z HOME PAGE REDESIGN
+   ============================================ */
+
+/* ---- Hero Banner ---- */
+.home-hero {
+    position: relative;
+    margin: 0;
+    overflow: hidden;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.home-hero-blur {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        135deg,
+        rgba(255, 0, 60, 0.35) 0%,
+        rgba(120, 0, 255, 0.25) 40%,
+        rgba(0, 180, 255, 0.15) 100%
+    );
+    background-size: cover;
+    background-position: center;
+    filter: blur(0px);
+    transform: scale(1.05);
+    transition: background-image 0.8s ease;
+    z-index: 0;
+}
+
+.home-hero-noise {
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+/* Radial gradient overlay for depth */
+.home-hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        to bottom,
+        rgba(0,0,0,0.1) 0%,
+        rgba(0,0,0,0.5) 60%,
+        rgba(0,0,0,0.92) 100%
+    );
+    z-index: 2;
+}
+
+.home-hero-content {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 28px 28px 16px;
+    gap: 16px;
+}
+
+.home-hero-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.home-hero-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 6px;
+}
+
+.home-hero .greeting {
+    font-size: clamp(28px, 5vw, 52px);
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    line-height: 1.05;
+    color: #fff;
+    text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+    margin-bottom: 0;
+    display: block;
+}
+
+.home-hero-sub {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-top: 6px;
+    font-weight: 400;
+}
+
+.home-hero-art {
+    width: 72px;
+    height: 72px;
+    border-radius: 14px;
+    background-size: cover;
+    background-position: center;
+    background-color: rgba(255,255,255,0.08);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6), 0 0 0 2px rgba(255,255,255,0.1);
+    flex-shrink: 0;
+    transition: all 0.5s var(--ease-smooth);
+    transform: rotate(-3deg);
+}
+
+.home-hero-art:empty {
+    display: none;
+}
+
+/* ---- Quick Access Chips ---- */
+.home-chips-row {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    gap: 8px;
+    padding: 0 20px 20px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.home-chips-row::-webkit-scrollbar { display: none; }
+
+.home-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(16px);
+    border-radius: 999px;
+    color: rgba(255,255,255,0.85);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s var(--ease-smooth);
+    flex-shrink: 0;
+}
+
+.home-chip:hover {
+    background: rgba(255,255,255,0.18);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.home-chip--active,
+.home-chip.active {
+    background: #fff;
+    color: #000;
+    border-color: #fff;
+    font-weight: 700;
+}
+
+/* ---- Content wrapper tweaks ---- */
+.content-wrapper {
+    padding: 0 !important;
+}
+
+/* ---- Home Feed Sections ---- */
+.home-feed {
+    display: flex !important;
+    flex-direction: column;
+    gap: 0;
+    padding: 8px 0 120px;
+}
+
+.home-section {
+    padding: 24px 0 8px;
+}
+
+.home-section-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 0 24px 14px;
+}
+
+.home-section-title {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Colored pill badge before section title */
+.home-section-title::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 20px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, #ff003c, #a000ff);
+    flex-shrink: 0;
+}
+
+.home-section-sub {
+    font-size: 12px;
+    color: rgba(255,255,255,0.45);
+    margin-top: 3px;
+    font-weight: 400;
+}
+
+/* ---- Horizontal Scroll Grid ---- */
+.home-section-grid {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 14px !important;
+    overflow-x: auto !important;
+    padding: 4px 24px 12px !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+    scroll-snap-type: x mandatory;
+}
+
+.home-section-grid::-webkit-scrollbar { display: none !important; }
+
+/* Cards inside the horizontal rows */
+.home-section-grid .card {
+    flex: 0 0 160px !important;
+    width: 160px !important;
+    scroll-snap-align: start;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.06) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    padding: 12px !important;
+    transition: transform 0.25s var(--ease-smooth), background 0.25s var(--ease-smooth) !important;
+}
+
+.home-section-grid .card:hover {
+    transform: translateY(-6px) scale(1.02) !important;
+    background: rgba(255,255,255,0.12) !important;
+}
+
+.home-section-grid .card-image {
+    border-radius: 10px !important;
+    margin-bottom: 10px !important;
+}
+
+/* ---- Section label badges (🔥 Trending, 💜 For You) ---- */
+.home-section--trending .home-section-title::before {
+    background: linear-gradient(180deg, #ff6f00, #ff0058);
+}
+
+.home-section--foryou .home-section-title::before {
+    background: linear-gradient(180deg, #a000ff, #0070ff);
+}
+
+.home-section--continue .home-section-title::before {
+    background: linear-gradient(180deg, #00c9ff, #0070ff);
+}
+
+/* ---- Login banner inside home feed ---- */
+.home-login-banner {
+    margin: 4px 24px 16px;
+    padding: 20px 24px;
+    background: linear-gradient(135deg, rgba(255,0,60,0.15), rgba(160,0,255,0.1));
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+/* ---- Quick Actions block ---- */
+.home-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding: 8px 24px 16px;
+}
+
+.home-quick-action-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s var(--ease-smooth);
+    font-weight: 600;
+    font-size: 14px;
+    color: #fff;
+}
+
+.home-quick-action-card:hover {
+    background: rgba(255,255,255,0.12);
+    transform: scale(1.02);
+}
+
+.home-quick-action-card i {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+    background: linear-gradient(135deg, rgba(255,0,60,0.3), rgba(160,0,255,0.2));
+}
+
+/* ---- Explore CTA ---- */
+.home-explore-cta {
+    margin: 8px 24px 32px;
+    padding: 28px 28px;
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(255,0,60,0.2) 0%, rgba(120,0,255,0.2) 60%, rgba(0,180,255,0.1) 100%);
+    border: 1px solid rgba(255,255,255,0.1);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.home-explore-cta::before {
+    content: '';
+    position: absolute;
+    top: -60%;
+    right: -20%;
+    width: 200px;
+    height: 200px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
+    pointer-events: none;
+}
+
+.home-explore-cta-text h4 {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 4px;
+}
+
+.home-explore-cta-text p {
+    font-size: 13px;
+    color: rgba(255,255,255,0.55);
+}
+
+.home-explore-cta-btn {
+    flex-shrink: 0;
+    padding: 10px 22px;
+    background: #fff;
+    color: #000;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s var(--ease-smooth);
+    font-family: 'Outfit', sans-serif;
+}
+
+.home-explore-cta-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+}
+
+/* ---- Responsive Mobile ---- */
+@media (max-width: 768px) {
+    .home-hero {
+        min-height: 180px;
+    }
+
+    .home-hero-content {
+        padding: 20px 16px 12px;
+    }
+
+    .home-chips-row {
+        padding: 0 14px 16px;
+        gap: 6px;
+    }
+
+    .home-chip {
+        padding: 7px 14px;
+        font-size: 12px;
+    }
+
+    .home-section-head {
+        padding: 0 16px 10px;
+    }
+
+    .home-section-grid {
+        padding: 4px 16px 12px !important;
+        gap: 10px !important;
+    }
+
+    .home-section-grid .card {
+        flex: 0 0 140px !important;
+        width: 140px !important;
+    }
+
+    .home-quick-actions {
+        padding: 8px 16px 16px;
+    }
+
+    .home-explore-cta {
+        margin: 8px 16px 24px;
+        padding: 20px 20px;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

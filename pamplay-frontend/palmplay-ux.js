@@ -354,6 +354,20 @@
                 if (a) a.textContent = artist;
                 if (ar && art) ar.style.backgroundImage = art;
                 if (bgLayer && art) bgLayer.style.backgroundImage = art;
+
+                // Update hero banner art thumbnail + blur background
+                const heroArtEl = document.getElementById('home-hero-art');
+                const heroBlurEl = document.getElementById('home-hero-blur');
+                if (heroArtEl && art) {
+                    heroArtEl.style.backgroundImage = art;
+                    heroArtEl.style.display = 'block';
+                }
+                if (heroBlurEl && art) {
+                    heroBlurEl.style.backgroundImage = art;
+                    heroBlurEl.style.filter = 'blur(40px) saturate(180%)';
+                    heroBlurEl.style.opacity = '0.7';
+                    heroBlurEl.style.transform = 'scale(1.15)';
+                }
                 
                 if (alb && ctx?.track?.album) {
                     const albumLabel = ctx.track.album;
