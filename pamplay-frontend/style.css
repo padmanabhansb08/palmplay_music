@@ -2251,8 +2251,9 @@ body.player-bar-hidden .player-bar {
     background-position: center;
     filter: blur(0px);
     transform: scale(1.05);
-    transition: background-image 0.8s ease;
+    transition: background-image 0.6s ease, filter 0.6s ease, opacity 0.6s ease;
     z-index: 0;
+    opacity: 0.6;
 }
 
 .home-hero-noise {

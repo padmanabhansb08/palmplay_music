@@ -4187,6 +4187,40 @@ document.addEventListener('DOMContentLoaded', () => {
             : 'Welcome to PalmPlay';
         if (sectionTitleEl) sectionTitleEl.textContent = 'Listen now';
 
+        // Pre-populate hero banner with the last played song — never show empty black
+        (function seedHeroBanner() {
+            const heroArtEl = document.getElementById('home-hero-art');
+            const heroBlurEl = document.getElementById('home-hero-blur');
+            const heroSubEl = document.querySelector('.home-hero-sub');
+            if (!heroBlurEl) return;
+
+            // First check if a song is actively playing
+            const activeArt = document.querySelector('.album-art')?.style.backgroundImage;
+            const activeName = document.querySelector('.track-name')?.textContent;
+            if (activeArt && activeName && activeName !== 'Select a song') {
+                if (heroArtEl) { heroArtEl.style.backgroundImage = activeArt; heroArtEl.style.display = 'block'; }
+                heroBlurEl.style.backgroundImage = activeArt;
+                heroBlurEl.style.filter = 'blur(40px) saturate(180%)';
+                heroBlurEl.style.opacity = '0.7';
+                heroBlurEl.style.transform = 'scale(1.15)';
+                if (heroSubEl && activeName) heroSubEl.textContent = `Last played: ${activeName}`;
+                return;
+            }
+
+            // Fallback to last entry in play history
+            const history = getPlayHistory();
+            const last = history[0];
+            if (!last?.art) return;
+
+            const artUrl = `url("${last.art.replace(/"/g, '\\"')}")`;
+            if (heroArtEl) { heroArtEl.style.backgroundImage = artUrl; heroArtEl.style.display = 'block'; }
+            heroBlurEl.style.backgroundImage = artUrl;
+            heroBlurEl.style.filter = 'blur(40px) saturate(180%)';
+            heroBlurEl.style.opacity = '0.7';
+            heroBlurEl.style.transform = 'scale(1.15)';
+            if (heroSubEl) heroSubEl.textContent = `Last played: ${last.name}`;
+        })();
+
         cardGrid.className = 'card-grid home-feed';
         cardGrid.style.display = 'block';
 
