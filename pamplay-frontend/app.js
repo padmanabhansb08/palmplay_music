@@ -2987,7 +2987,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
 
-    async function importFromApps(rawText, playlistName) {
+    async function importFromApps(rawText, playlistName, onProgress) {
         const trimmed = String(rawText || '').trim();
 
         // Direct JioSaavn Link Import Support
@@ -3061,13 +3061,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const plIndex = await createUserPlaylist(plName);
         if (plIndex < 0) return;
 
-        showToast(`Matching ${entries.length} tracks...`, 'fa-spinner fa-spin');
-
         const concurrencyLimit = 6;
         const resolvedTracks = new Array(entries.length).fill(null);
         const missedEntries = [];
         let cursor = 0;
         let resolved = 0;
+        let processed = 0;
 
         const workers = Array.from({ length: Math.min(concurrencyLimit, entries.length) }, async () => {
             while (cursor < entries.length) {
@@ -3076,18 +3075,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const match = await resolveImportedTrack(entry);
                     resolvedTracks[index] = match;
+                    processed++;
                     if (match) {
                         resolved++;
+                        onProgress && onProgress({ processed, total: entries.length, resolved, missed: missedEntries.length, lastTrack: match.name, lastArtist: match.artist, found: true });
                     } else {
-                        missedEntries.push(entry.name || entry.query || '?');
-                    }
-                    // Update toast every 5 resolved tracks
-                    if ((resolved + missedEntries.length) % 5 === 0) {
-                        showToast(`Matching... ${resolved + missedEntries.length}/${entries.length}`, 'fa-spinner fa-spin');
+                        const nm = entry.name || entry.query || '?';
+                        missedEntries.push(nm);
+                        onProgress && onProgress({ processed, total: entries.length, resolved, missed: missedEntries.length, lastTrack: nm, found: false });
                     }
                 } catch (e) {
                     console.warn('Failed to resolve entry:', entry, e);
-                    missedEntries.push(entry.name || '?');
+                    const nm = entry.name || '?';
+                    missedEntries.push(nm);
+                    processed++;
+                    onProgress && onProgress({ processed, total: entries.length, resolved, missed: missedEntries.length, lastTrack: nm, found: false });
                 }
             }
         });
@@ -3169,14 +3171,78 @@ document.addEventListener('DOMContentLoaded', () => {
         confirmBtn.onclick = async () => {
             const raw = tracksTextEl?.value || '';
             const plName = inputEl.value || '';
-            confirmBtn.disabled = true;
-            confirmBtn.textContent = 'Importing...';
-            await importFromApps(raw, plName);
+            if (!raw.trim()) { showToast('Paste a track list or link first', 'fa-file-import'); return; }
+
+            // --- Switch modal to progress view ---
+            confirmBtn.style.display = 'none';
+            cancelBtn.style.display = 'none';
+            inputEl.style.display = 'none';
+            titleEl.textContent = 'Importing...';
+
+            const totalLines = raw.split('\n').filter(l => l.trim()).length;
+            messageEl.innerHTML = `
+                <div id="import-progress-ui" style="text-align:center; padding: 10px 0 4px; font-family: inherit;">
+                    <div style="width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#a855f7,#6366f1);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 0 24px rgba(168,85,247,0.4);">
+                        <i class="fas fa-music" style="font-size:22px;color:#fff;"></i>
+                    </div>
+                    <div id="imp-track-name" style="font-size:14px;font-weight:600;color:#fff;min-height:20px;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px;margin:0 auto 4px;">Scanning your playlist...</div>
+                    <div id="imp-track-artist" style="font-size:12px;color:rgba(255,255,255,0.45);min-height:16px;margin-bottom:16px;"></div>
+                    <div style="background:rgba(255,255,255,0.08);border-radius:999px;height:6px;overflow:hidden;margin:0 8px 12px;">
+                        <div id="imp-bar" style="height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,#a855f7,#6366f1,#38bdf8);transition:width 0.35s ease;box-shadow:0 0 8px rgba(168,85,247,0.6);"></div>
+                    </div>
+                    <div style="display:flex;justify-content:center;gap:28px;margin-bottom:18px;">
+                        <div style="text-align:center;">
+                            <div id="imp-count" style="font-size:24px;font-weight:800;color:#a855f7;line-height:1;">0</div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;letter-spacing:0.05em;text-transform:uppercase;">Matched</div>
+                        </div>
+                        <div style="width:1px;background:rgba(255,255,255,0.1);"></div>
+                        <div style="text-align:center;">
+                            <div id="imp-miss" style="font-size:24px;font-weight:800;color:#f97316;line-height:1;">0</div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;letter-spacing:0.05em;text-transform:uppercase;">Not Found</div>
+                        </div>
+                        <div style="width:1px;background:rgba(255,255,255,0.1);"></div>
+                        <div style="text-align:center;">
+                            <div id="imp-total" style="font-size:24px;font-weight:800;color:rgba(255,255,255,0.6);line-height:1;">${totalLines}</div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;letter-spacing:0.05em;text-transform:uppercase;">Total</div>
+                        </div>
+                    </div>
+                    <div id="imp-log" style="max-height:90px;overflow:hidden;display:flex;flex-direction:column-reverse;gap:3px;padding:0 4px;"></div>
+                </div>
+            `;
+
+            const barEl = document.getElementById('imp-bar');
+            const countEl = document.getElementById('imp-count');
+            const missEl = document.getElementById('imp-miss');
+            const nameEl = document.getElementById('imp-track-name');
+            const artistEl = document.getElementById('imp-track-artist');
+            const logEl = document.getElementById('imp-log');
+
+            const onProgress = ({ processed, total, resolved, missed, lastTrack, lastArtist, found }) => {
+                const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+                if (barEl) barEl.style.width = `${pct}%`;
+                if (countEl) countEl.textContent = resolved;
+                if (missEl) missEl.textContent = missed;
+                if (nameEl) nameEl.textContent = lastTrack || '';
+                if (artistEl) artistEl.textContent = lastArtist ? `by ${lastArtist}` : '';
+                if (logEl && lastTrack) {
+                    const pill = document.createElement('div');
+                    pill.style.cssText = `display:inline-flex;align-items:center;gap:5px;background:${found ? 'rgba(168,85,247,0.12)' : 'rgba(249,115,22,0.08)'};border:1px solid ${found ? 'rgba(168,85,247,0.25)' : 'rgba(249,115,22,0.2)'};border-radius:999px;padding:2px 9px;font-size:11px;color:${found ? 'rgba(255,255,255,0.75)' : 'rgba(249,115,22,0.7)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;`;
+                    pill.innerHTML = `<i class="fas fa-${found ? 'check' : 'times'}" style="font-size:8px;"></i>${escapeHtml(lastTrack)}`;
+                    logEl.insertBefore(pill, logEl.firstChild);
+                    if (logEl.children.length > 5) logEl.removeChild(logEl.lastChild);
+                }
+            };
+
+            await importFromApps(raw, plName, onProgress);
+
+            // --- Done: restore modal ---
             container.style.display = 'none';
             confirmBtn.disabled = false;
-            confirmBtn.textContent = 'Confirm';
+            confirmBtn.style.display = 'inline-flex';
+            confirmBtn.textContent = 'Import';
+            cancelBtn.style.display = 'inline-flex';
             inputEl.style.display = 'none';
-            messageEl.textContent = '';
+            messageEl.innerHTML = '';
         };
         cancelBtn.onclick = () => {
             container.style.display = 'none';
