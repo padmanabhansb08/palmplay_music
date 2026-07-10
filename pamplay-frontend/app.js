@@ -236,7 +236,23 @@ function parseImportedTrackEntries(rawText) {
     const entries = [];
     const seen = new Set();
 
-    const pushEntry = (name, artist = '') => {
+    // Auto-detect format: sample first 5 'X - Y' lines and check if the part before
+    // the dash looks like a known artist pattern (short, no common song keywords).
+    // YouTube Music exports are "Artist - Title"; TuneMyMusic/CSV exports are "Title - Artist".
+    const sampleLines = lines.filter(l => l.includes(' - ')).slice(0, 8);
+    let artistFirstVotes = 0;
+    let titleFirstVotes = 0;
+    const songKeywords = /\b(love|heart|night|dream|feel|know|wanna|gonna|baby|song|road|sky|light|rain|eyes|time|way|life|world|back|day|girl|boy|man|woman|get|take|make|come|stay|run|fall|rise|fire|home|mind|soul|wait|need)\b/i;
+    sampleLines.forEach(l => {
+        const [a, b] = l.split(' - ').map(s => s.trim());
+        // If the FIRST part is short and title-case and the SECOND part has song-like words,
+        // it's probably "Artist - Title" (YouTube Music format)
+        if (a && b && a.length < 35 && !songKeywords.test(a) && songKeywords.test(b)) artistFirstVotes++;
+        else titleFirstVotes++;
+    });
+    const artistFirst = artistFirstVotes > titleFirstVotes;
+
+    const pushEntry = (name, artist = '', altName = '', altArtist = '') => {
         const cleanName = String(name || '').replace(/^\d+[\)\.\-\s]+/, '').trim();
         const cleanArtist = String(artist || '').trim();
         if (!cleanName || /^https?:\/\//i.test(cleanName)) return;
@@ -246,6 +262,9 @@ function parseImportedTrackEntries(rawText) {
         entries.push({
             name: cleanName,
             artist: cleanArtist,
+            // Store alternate interpretation so resolver can try both orders
+            altName: altName || '',
+            altArtist: altArtist || '',
             query: `${cleanName} ${cleanArtist}`.trim()
         });
     };
@@ -257,7 +276,8 @@ function parseImportedTrackEntries(rawText) {
             if (/(track|title|song).*(artist)|(artist).*(track|title|song)/.test(joined) && cols.length <= 4) return;
             if (/^#?$/.test(cols[0]) || /^\d+$/.test(cols[0])) cols.shift();
             if (cols.length >= 2) {
-                pushEntry(cols[0], cols[1]);
+                // CSV columns are usually Title, Artist order
+                pushEntry(cols[0], cols[1], cols[1], cols[0]);
                 return;
             }
         }
@@ -265,7 +285,15 @@ function parseImportedTrackEntries(rawText) {
         if (line.includes(' - ')) {
             const parts = line.split(' - ').map(s => s.trim()).filter(Boolean);
             if (parts.length >= 2) {
-                pushEntry(parts[0], parts[1]);
+                const a = parts[0];
+                const b = parts.slice(1).join(' - '); // Rejoin in case title has ' - ' in it
+                if (artistFirst) {
+                    // YouTube Music: Artist - Title
+                    pushEntry(b, a, a, b);
+                } else {
+                    // Standard: Title - Artist
+                    pushEntry(a, b, b, a);
+                }
                 return;
             }
         }
@@ -2881,10 +2909,14 @@ document.addEventListener('DOMContentLoaded', () => {
     async function resolveImportedTrack(entry) {
         const rawName = String(entry.name || '').trim();
         const rawArtist = String(entry.artist || '').trim();
+        const altName = String(entry.altName || '').trim();
+        const altArtist = String(entry.altArtist || '').trim();
         const cleanName = cleanMetadataString(rawName);
         const cleanArtist = cleanMetadataString(rawArtist);
+        const cleanAltName = altName ? cleanMetadataString(altName) : '';
+        const cleanAltArtist = altArtist ? cleanMetadataString(altArtist) : '';
 
-        // Extract the first few significant words for a keyword-only fallback query
+        // Extract first 4 significant keywords for last-resort fallback
         const keywordOnlyQuery = cleanName
             .split(/[\s\-\(\[&,]+/)
             .map(w => w.replace(/[^a-zA-Z0-9\u0900-\u097F]/g, '').trim())
@@ -2892,25 +2924,40 @@ document.addEventListener('DOMContentLoaded', () => {
             .slice(0, 4)
             .join(' ');
 
-        // Build 5-stage progressive query strategy:
-        // 1. Full cleaned: "<title> <artist>" — most specific
-        // 2. Clean title only — handles missing/wrong artist
-        // 3. Raw title + artist (before cleaning) — catches edge-cases where cleaner stripped too much
-        // 4. Raw title only
-        // 5. Keyword-only (first 4 words of title) — last-resort for long/complex titles
+        // 7-stage progressive query strategy:
+        // 1. cleanTitle + cleanArtist  — most specific
+        // 2. cleanTitle only           — handles missing/wrong artist
+        // 3. altName + altArtist       — other ordering (catches YouTube Music Artist-first format)
+        // 4. altName only              — alt title without artist
+        // 5. rawName + rawArtist       — before cleaning (catches over-stripping)
+        // 6. rawName only
+        // 7. keyword-only              — last-resort for long/complex titles
         const seen = new Set();
         const queries = [
             `${cleanName} ${cleanArtist}`.trim(),
             cleanName,
+            cleanAltName && cleanAltArtist ? `${cleanAltName} ${cleanAltArtist}`.trim() : '',
+            cleanAltName || '',
             `${rawName} ${rawArtist}`.trim(),
             rawName,
             keywordOnlyQuery
         ].filter(q => {
-            q = q.trim();
+            q = (q || '').trim();
             if (!q || seen.has(q)) return false;
             seen.add(q);
             return true;
         });
+
+        // The item we score against — prefer the clean version, fall back to alt
+        const scoreItem = {
+            name: cleanName || cleanAltName || rawName,
+            artist: cleanArtist || cleanAltArtist || rawArtist
+        };
+        // Also try scoring against the alternate interpretation
+        const scoreItemAlt = altName ? {
+            name: cleanAltName || altName,
+            artist: cleanAltArtist || altArtist
+        } : null;
 
         let bestCandidate = null;
         let bestCandidateScore = -1;
@@ -2919,27 +2966,24 @@ document.addEventListener('DOMContentLoaded', () => {
             let tracks = await fetchCatalogTracks(query, 15);
             if (!tracks.length) continue;
 
-            const picked = pickCuratedMatch(tracks, {
-                name: cleanName,
-                artist: cleanArtist
-            });
+            // Score against primary interpretation
+            const picked = pickCuratedMatch(tracks, scoreItem);
+            // Score against alternate interpretation (e.g. artist-first format)
+            const pickedAlt = scoreItemAlt ? pickCuratedMatch(tracks, scoreItemAlt) : null;
 
-            if (picked?.track) {
-                // Short-circuit on very high-confidence match
-                if (picked.score >= 0.82) {
-                    return picked.track;
-                }
-                if (picked.score > bestCandidateScore) {
-                    bestCandidateScore = picked.score;
-                    bestCandidate = picked.track;
+            // Take the better of the two
+            const best = (!pickedAlt || (picked?.score ?? 0) >= (pickedAlt?.score ?? 0)) ? picked : pickedAlt;
+
+            if (best?.track) {
+                if (best.score >= 0.82) return best.track;
+                if (best.score > bestCandidateScore) {
+                    bestCandidateScore = best.score;
+                    bestCandidate = best.track;
                 }
             }
         }
 
-        // Accept match if it clears 0.35 minimum quality bar
-        if (bestCandidate && bestCandidateScore >= 0.35) {
-            return bestCandidate;
-        }
+        if (bestCandidate && bestCandidateScore >= 0.35) return bestCandidate;
         return null;
     }
 
@@ -3006,8 +3050,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Fallback: CSV or copy-pasted list text parsing
-        const entries = parseImportedTrackEntries(rawText).slice(0, 80);
+        // Fallback: CSV or copy-pasted list text parsing — supports up to 500 songs
+        const entries = parseImportedTrackEntries(rawText).slice(0, 500);
         if (!entries.length) {
             showToast('Paste track list text, CSV, or a JioSaavn link first', 'fa-file-import');
             return;
