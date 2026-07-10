@@ -545,7 +545,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!pl.isTemporary) {
                     const row = await db.playlists.get(pl.id);
                     if (row?.cloudId) {
-                        await window.PalmPlaySync?.deleteCloudPlaylist?.({ cloudId: row.cloudId });
+                        try {
+                            await window.PalmPlaySync?.deleteCloudPlaylist?.({ cloudId: row.cloudId });
+                        } catch (cloudErr) {
+                            console.warn('Failed to delete cloud playlist:', cloudErr);
+                        }
                     }
                     await db.tracks.where('playlistId').equals(pl.id).delete();
                     await db.playlists.delete(pl.id);
