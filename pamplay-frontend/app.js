@@ -185,7 +185,11 @@ function showModal(title, message, onConfirm, showInput = false, defaultValue = 
     titleEl.textContent = title;
     messageEl.textContent = message;
 
-    if (confirmBtn) confirmBtn.style.display = '';
+    if (confirmBtn) {
+        confirmBtn.style.display = '';
+        confirmBtn.textContent = 'Confirm';
+        confirmBtn.disabled = false;
+    }
 
     if (showInput) {
         inputEl.style.display = 'block';
@@ -508,16 +512,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.renamePlaylist = async (index) => {
         const pl = playlists[index];
-
         showModal('Rename Folder', 'Choose a new name for your collection:', async (newName) => {
-            if (newName && newName.trim() !== "" && newName !== pl.name) {
+            const trimmed = newName.trim();
+            if (trimmed && trimmed !== pl.name) {
                 try {
-                    await db.playlists.update(pl.id, { name: newName.trim() });
-                    pl.name = newName.trim();
-                    showToast(`Renamed to "${newName}"`, 'fa-edit');
+                    if (!pl.isTemporary) {
+                        await db.playlists.update(pl.id, {
+                            name: trimmed,
+                            updatedAt: new Date().toISOString()
+                        });
+                    }
+                    pl.name = trimmed;
+                    showToast("Folder renamed", 'fa-check');
                     renderSidebar();
-                    showPlaylist(index); // Refresh view
-                    window.PalmPlaySync?.pushPlaylist?.(pl).catch((e) => console.warn('Cloud rename', e));
+                    renderHome();
+                    
+                    if (!pl.isTemporary && pl.cloudId) {
+                        window.PalmPlaySync?.pushPlaylist?.(pl).catch((e) => console.warn('Cloud rename', e));
+                    }
                 } catch (err) {
                     console.error("Rename failed:", err);
                     showToast("Failed to rename", 'fa-exclamation-triangle');
@@ -530,12 +542,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const pl = playlists[index];
         showModal('Delete Folder', `Are you sure you want to delete "${pl.name}"? This will remove all songs inside it.`, async () => {
             try {
-                const row = await db.playlists.get(pl.id);
-                if (row?.cloudId) {
-                    await window.PalmPlaySync?.deleteCloudPlaylist?.({ cloudId: row.cloudId });
+                if (!pl.isTemporary) {
+                    const row = await db.playlists.get(pl.id);
+                    if (row?.cloudId) {
+                        await window.PalmPlaySync?.deleteCloudPlaylist?.({ cloudId: row.cloudId });
+                    }
+                    await db.tracks.where('playlistId').equals(pl.id).delete();
+                    await db.playlists.delete(pl.id);
                 }
-                await db.tracks.where('playlistId').equals(pl.id).delete();
-                await db.playlists.delete(pl.id);
 
                 if (state.currentPlaylistIndex === index) {
                     audio.pause();
