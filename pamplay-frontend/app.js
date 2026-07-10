@@ -2467,11 +2467,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function cleanMetadataString(str) {
         if (!str) return '';
-        return str
-            .replace(/\s*[\(\[][^)]*?(remix|lrc|lyrical|audio|video|official|film|from|feat|ft|cover|tribute|karaoke|version|mix)[^)]*?[\)\]]/gi, '')
-            .replace(/\s*[\(\[][^)]*?(movie|soundtrack|original|hits|pop|series|bgm)[^)]*?[\)\]]/gi, '')
-            .replace(/\s*-\s*(remix|lrc|lyrical|audio|video|official|film|from|feat|ft|cover|tribute|karaoke|movie|soundtrack|version|mix|original).*/gi, '')
+        let s = str
+            // Remove bracketed/parenthetical notes with known keywords
+            .replace(/\s*\[[^\]]*?(remix|lrc|lyrical|audio|video|official|film|from|feat|ft|cover|tribute|karaoke|version|mix|remaster|reprise|unplugged|live|acoustic|instrumental)[^\]]*?\]/gi, '')
+            .replace(/\s*\([^)]*?(remix|lrc|lyrical|audio|video|official|film|from|feat|ft|cover|tribute|karaoke|version|mix|remaster|reprise|unplugged|live|acoustic|instrumental)[^)]*?\)/gi, '')
+            // Remove soundtrack/movie markers
+            .replace(/\s*\[[^\]]*?(movie|soundtrack|original|hits|pop|series|bgm|ost)[^\]]*?\]/gi, '')
+            .replace(/\s*\([^)]*?(movie|soundtrack|original|hits|pop|series|bgm|ost)[^)]*?\)/gi, '')
+            // Remove trailing after dash only for known non-title suffixes
+            .replace(/\s+-\s*(official\s*(audio|video|lyric)|lyrics?|full\s*(song|video)|hd|hq|4k|remix|remaster|reprise|unplugged|live|acoustic|instrumental).*/gi, '')
             .trim();
+        // Safety: if cleaning made it empty or very short, return original
+        return s.length >= 2 ? s : str.trim();
     }
 
     function normalizeSearchText(value) {
@@ -2510,7 +2517,19 @@ document.addEventListener('DOMContentLoaded', () => {
         const sourceSpaceless = sourceTitle.replace(/\s+/g, '');
         
         const titleTokensScore = scoreTokenOverlap(tokenSet(item.name), tokenSet(track.name));
-        let titleScore = titleTokensScore;
+
+        // Partial-token scoring: count tokens that appear as substrings in the other set
+        const targetTokens = tokenSet(item.name);
+        const sourceTokens = tokenSet(track.name);
+        let partialHits = 0;
+        targetTokens.forEach(t => {
+            sourceTokens.forEach(s => {
+                if (s.includes(t) || t.includes(s)) partialHits++;
+            });
+        });
+        const partialScore = targetTokens.size > 0 ? Math.min(partialHits / targetTokens.size, 1) : 0;
+
+        let titleScore = Math.max(titleTokensScore, partialScore * 0.8);
         
         if (sourceTitle === targetTitle || sourceSpaceless === targetSpaceless) {
             titleScore = 1.0;
@@ -2519,14 +2538,20 @@ document.addEventListener('DOMContentLoaded', () => {
             titleScore = Math.max(titleScore, 0.88);
         }
 
-        const artistTarget = item.artist.split(',').map(a => a.trim()).filter(Boolean);
+        const artistTarget = item.artist ? item.artist.split(',').map(a => a.trim()).filter(Boolean) : [];
         const artistSource = String(track.artist || '').split(',').map(a => a.trim()).filter(Boolean);
+
+        // If no artist info was provided, weight only on title
+        if (!artistTarget.length || !artistTarget[0]) {
+            return titleScore;
+        }
+
         const artistScore = scoreTokenOverlap(
             tokenSet(artistTarget.join(' ')),
             tokenSet(artistSource.join(' '))
         );
 
-        return (titleScore * 0.70) + (artistScore * 0.30);
+        return (titleScore * 0.72) + (artistScore * 0.28);
     }
 
     function pickCuratedMatch(tracks, item) {
@@ -2854,20 +2879,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function resolveImportedTrack(entry) {
-        const cleanName = cleanMetadataString(entry.name);
-        const cleanArtist = cleanMetadataString(entry.artist);
+        const rawName = String(entry.name || '').trim();
+        const rawArtist = String(entry.artist || '').trim();
+        const cleanName = cleanMetadataString(rawName);
+        const cleanArtist = cleanMetadataString(rawArtist);
 
-        // Defined progressive queries: specific first, then general title-only
+        // Extract the first few significant words for a keyword-only fallback query
+        const keywordOnlyQuery = cleanName
+            .split(/[\s\-\(\[&,]+/)
+            .map(w => w.replace(/[^a-zA-Z0-9\u0900-\u097F]/g, '').trim())
+            .filter(w => w.length > 1)
+            .slice(0, 4)
+            .join(' ');
+
+        // Build 5-stage progressive query strategy:
+        // 1. Full cleaned: "<title> <artist>" — most specific
+        // 2. Clean title only — handles missing/wrong artist
+        // 3. Raw title + artist (before cleaning) — catches edge-cases where cleaner stripped too much
+        // 4. Raw title only
+        // 5. Keyword-only (first 4 words of title) — last-resort for long/complex titles
+        const seen = new Set();
         const queries = [
             `${cleanName} ${cleanArtist}`.trim(),
-            cleanName
-        ].filter((q, i, arr) => q && arr.indexOf(q) === i);
+            cleanName,
+            `${rawName} ${rawArtist}`.trim(),
+            rawName,
+            keywordOnlyQuery
+        ].filter(q => {
+            q = q.trim();
+            if (!q || seen.has(q)) return false;
+            seen.add(q);
+            return true;
+        });
 
         let bestCandidate = null;
         let bestCandidateScore = -1;
 
         for (const query of queries) {
-            let tracks = await fetchCatalogTracks(query, 10);
+            let tracks = await fetchCatalogTracks(query, 15);
             if (!tracks.length) continue;
 
             const picked = pickCuratedMatch(tracks, {
@@ -2876,12 +2925,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (picked?.track) {
-                // Short-circuit: if we have a very high-quality match, return it immediately to save requests
-                if (picked.score >= 0.85) {
+                // Short-circuit on very high-confidence match
+                if (picked.score >= 0.82) {
                     return picked.track;
                 }
-
-                // Otherwise track the best candidate found across all queries
                 if (picked.score > bestCandidateScore) {
                     bestCandidateScore = picked.score;
                     bestCandidate = picked.track;
@@ -2889,8 +2936,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // Return the best candidate if it meets the minimum threshold (e.g. 0.40)
-        if (bestCandidate && bestCandidateScore >= 0.40) {
+        // Accept match if it clears 0.35 minimum quality bar
+        if (bestCandidate && bestCandidateScore >= 0.35) {
             return bestCandidate;
         }
         return null;
@@ -2970,11 +3017,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const plIndex = await createUserPlaylist(plName);
         if (plIndex < 0) return;
 
-        showToast('Matching tracks in parallel...', 'fa-spinner fa-spin');
+        showToast(`Matching ${entries.length} tracks...`, 'fa-spinner fa-spin');
 
-        const concurrencyLimit = 4;
+        const concurrencyLimit = 6;
         const resolvedTracks = new Array(entries.length).fill(null);
+        const missedEntries = [];
         let cursor = 0;
+        let resolved = 0;
 
         const workers = Array.from({ length: Math.min(concurrencyLimit, entries.length) }, async () => {
             while (cursor < entries.length) {
@@ -2983,19 +3032,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const match = await resolveImportedTrack(entry);
                     resolvedTracks[index] = match;
+                    if (match) {
+                        resolved++;
+                    } else {
+                        missedEntries.push(entry.name || entry.query || '?');
+                    }
+                    // Update toast every 5 resolved tracks
+                    if ((resolved + missedEntries.length) % 5 === 0) {
+                        showToast(`Matching... ${resolved + missedEntries.length}/${entries.length}`, 'fa-spinner fa-spin');
+                    }
                 } catch (e) {
                     console.warn('Failed to resolve entry:', entry, e);
+                    missedEntries.push(entry.name || '?');
                 }
             }
         });
         await Promise.all(workers);
 
         const finalTracks = resolvedTracks.filter(Boolean);
-        const misses = entries.length - finalTracks.length;
+        const missCount = missedEntries.length;
 
         const added = await addTracksToUserPlaylistBatch(plIndex, finalTracks);
         if (added > 0) {
-            showToast(`Imported ${added} tracks${misses ? ` (${misses} not found)` : ''}`, 'fa-check-circle');
+            if (missCount === 0) {
+                showToast(`✓ All ${added} tracks imported successfully!`, 'fa-check-circle');
+            } else {
+                showToast(`Imported ${added}/${entries.length} tracks. ${missCount} not found in catalog.`, 'fa-check-circle');
+                if (missCount > 0) {
+                    console.info('[Import] Songs not found in catalog:', missedEntries);
+                }
+            }
             showPlaylist(plIndex);
         } else {
             showToast('Could not import tracks from that list', 'fa-exclamation-triangle');
