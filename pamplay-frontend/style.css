@@ -1222,6 +1222,40 @@ body.player-bar-hidden .player-bar {
     text-align: center;
     box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6);
     animation: modalIn 0.4s var(--ease-smooth);
+    overflow: hidden;
+    position: relative;
+}
+
+/* Import progress bar pinned to the very top of the modal */
+#import-progress-track {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 20px 20px 0 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 10;
+}
+#import-progress-track.active {
+    opacity: 1;
+}
+#import-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #e53935, #ff6659, #ff1744, #e53935);
+    background-size: 200% 100%;
+    border-radius: 0 4px 4px 0;
+    box-shadow: 0 0 12px 3px rgba(229, 57, 53, 0.7), 0 0 24px 6px rgba(255, 23, 68, 0.3);
+    transition: width 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    animation: importBarShimmer 1.8s linear infinite;
+}
+@keyframes importBarShimmer {
+    0%   { background-position: 200% center; }
+    100% { background-position: -200% center; }
 }
 
 #modal-title {
