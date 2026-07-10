@@ -95,9 +95,43 @@ const item3 = { name: 'Chura Ke Dil Mera', artist: 'Kumar Sanu' };
 const score3 = computeCuratedMatchScore(track3, item3);
 assert(score3 < 0.80, `Same title but different artist should score lower. Got: ${score3}`);
 
-console.log(`\nVerification complete. Passes: ${passes}, Fails: ${fails}`);
-if (fails > 0) {
-    process.exit(1);
-} else {
-    process.exit(0);
-}
+console.log('\n--- Running Search Engine Fallback Tests ---');
+const mockFetchLog = [];
+const mockFetch = async (q) => {
+    mockFetchLog.push(q);
+    if (q === 'Chura Ke Dil Mera (From "Main Khiladi Tu Anari") [Original Sound Recording]') return [];
+    if (q === 'Chura Ke Dil Mera') return ['Chura Ke Dil Mera Song Object'];
+    return [];
+};
+
+const simulateSearchEngine = async (query) => {
+    let results = await mockFetch(query);
+    let cleanedQuery = cleanMetadataString(query);
+    if (results.length === 0 && cleanedQuery && cleanedQuery !== query) {
+        results = await mockFetch(cleanedQuery);
+    }
+    if (results.length === 0) {
+        const words = query
+            .split(/[\-\s\(\[\,\&]/)
+            .map(w => w.trim().replace(/[^a-zA-Z0-9]/g, ''))
+            .filter(w => w.length > 2);
+        if (words.length > 2) {
+            const simplified = words.slice(0, 3).join(' ');
+            results = await mockFetch(simplified);
+        }
+    }
+    return results;
+};
+
+(async () => {
+    const res = await simulateSearchEngine('Chura Ke Dil Mera (From "Main Khiladi Tu Anari") [Original Sound Recording]');
+    assert(res.length > 0 && res[0] === 'Chura Ke Dil Mera Song Object', 'Should fall back to cleaned query and find the song');
+    assert(mockFetchLog.includes('Chura Ke Dil Mera'), 'Should have queried for the cleaned title');
+    
+    console.log(`\nVerification complete. Passes: ${passes}, Fails: ${fails}`);
+    if (fails > 0) {
+        process.exit(1);
+    } else {
+        process.exit(0);
+    }
+})();

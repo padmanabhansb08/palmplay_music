@@ -4300,12 +4300,42 @@ document.addEventListener('DOMContentLoaded', () => {
             return [];
         }
 
+        const fetchRaw = async (q) => {
+            try {
+                const url = `${MUSIC_CATALOG_API_BASE}/search/songs?query=${encodeURIComponent(q)}&limit=${limit}`;
+                const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+                if (!res.ok) return [];
+                const data = await res.json();
+                return Array.isArray(data?.data?.results) ? data.data.results : [];
+            } catch (e) {
+                console.warn('Raw catalog search failed for:', q, e);
+                return [];
+            }
+        };
+
         try {
-            const url = `${MUSIC_CATALOG_API_BASE}/search/songs?query=${encodeURIComponent(query)}&limit=${limit}`;
-            const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-            const data = await res.json();
-            const results = data?.data?.results;
-            if (!Array.isArray(results) || results.length === 0) {
+            // Attempt 1: Raw user search string
+            let results = await fetchRaw(query);
+
+            // Attempt 2: Cleaned search string (removes parentheticals, feat, etc.)
+            let cleanedQuery = cleanMetadataString(query);
+            if (results.length === 0 && cleanedQuery && cleanedQuery !== query) {
+                results = await fetchRaw(cleanedQuery);
+            }
+
+            // Attempt 3: Simplified search query using the first 3 longest keywords
+            if (results.length === 0) {
+                const words = query
+                    .split(/[\-\s\(\[\,\&]/)
+                    .map(w => w.trim().replace(/[^a-zA-Z0-9]/g, ''))
+                    .filter(w => w.length > 2);
+                if (words.length > 2) {
+                    const simplified = words.slice(0, 3).join(' ');
+                    results = await fetchRaw(simplified);
+                }
+            }
+
+            if (results.length === 0) {
                 return [];
             }
 
@@ -4318,8 +4348,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     plays: Math.floor(Math.random() * 50000) + 10000
                 };
             }).filter(Boolean);
-            const q = normalizeSearchText(query);
+
+            // Score matches using the cleaned version of the query for higher accuracy
+            const scoreQuery = cleanedQuery || query;
+            const q = normalizeSearchText(scoreQuery);
             const tokens = new Set(q.split(' ').filter(Boolean));
+
             const score = (track) => {
                 const tn = normalizeSearchText(track.name);
                 const ta = normalizeSearchText(track.artist);
@@ -4335,6 +4369,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 s += Math.min(30, (track.plays || 0) / 4000);
                 return s;
             };
+
             mapped.sort((a, b) => score(b) - score(a));
             return mapped;
         } catch (e) {
