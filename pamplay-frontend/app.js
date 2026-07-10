@@ -4,7 +4,12 @@ const _env = (typeof window !== 'undefined' && window.PALMPLAY_ENV) ? window.PAL
 const _catalog = (typeof window !== 'undefined' && window.PALMPLAY_CATALOG) ? window.PALMPLAY_CATALOG : {};
 const MUSIC_CATALOG_API_BASE = (_catalog.apiBase || '').trim().replace(/\/$/, '');
 const DEFAULT_ART_URL = _env.DEFAULT_ART_URL || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop';
-const SPOTIFY_CLIENT_ID = (_env.SPOTIFY_CLIENT_ID || 'c6177a0759d04a8582e59cd86bd18fbf').trim();
+
+// Catalog Traffic Monitoring stub to prevent ReferenceErrors
+const catalogTraffic = {
+    recordStart() {},
+    recordEnd() {}
+};
 
 // Local Music Database & State
 let playlists = []; // Array of { name: string, tracks: [] }
@@ -403,6 +408,9 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'profile':
                 showToast('Profile settings coming soon!', 'fa-user');
                 break;
+            case 'tour':
+                startInteractiveTour();
+                break;
             case 'switch':
                 showSwitchUserModal();
                 break;
@@ -745,26 +753,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setupEventListeners();
         setupKeyboardShortcuts();
 
-        let spotifyHandled = false;
-        try {
-            spotifyHandled = await handleSpotifyOAuthCallback();
-            if (spotifyHandled && sessionStorage.getItem(SPOTIFY_AUTO_IMPORT_KEY) === '1') {
-                sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
-                let token = null;
-                try {
-                    token = await getValidSpotifyAccessToken();
-                } catch (e) {
-                    console.warn('Spotify token unavailable after callback', e);
-                }
-                if (token) {
-                    await importSpotifyLibraryToPalmPlay();
-                } else {
-                    showToast('Spotify connection incomplete. Please reconnect once.', 'fa-exclamation-triangle');
-                }
-            }
-        } catch (e) {
-            console.warn('Spotify callback handling failed', e);
-        }
+
 
         if (window.PalmPlayAuth) await window.PalmPlayAuth.init();
         const user = getSavedUser();
@@ -1563,27 +1552,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const RECENT_SEARCHES_MAX = 15;
     const PERSONAL_FEEDBACK_KEY = 'palmplay_personal_feedback_v1';
     const QUEUE_STATE_KEY = 'palmplay_queue_state_v1';
-    const SPOTIFY_TOKEN_KEY = 'palmplay_spotify_tokens_v1';
-    const SPOTIFY_PKCE_STATE_KEY = 'palmplay_spotify_pkce_state';
-    const SPOTIFY_PKCE_VERIFIER_KEY = 'palmplay_spotify_pkce_verifier';
-    const SPOTIFY_PKCE_CACHE_KEY = 'palmplay_spotify_pkce_cache_v1';
-    const SPOTIFY_REDIRECT_URI_KEY = 'palmplay_spotify_redirect_uri_v1';
-    const SPOTIFY_CLIENT_ID_STORE_KEY = 'palmplay_spotify_client_id_v1';
-    const SPOTIFY_AUTO_IMPORT_KEY = 'palmplay_spotify_auto_import';
-    const SPOTIFY_FORBIDDEN_RETRY_KEY = 'palmplay_spotify_forbidden_retry';
-    const SPOTIFY_SCOPES = [
-        'user-library-read',
-        'playlist-read-private',
-        'playlist-read-collaborative'
-    ].join(' ');
-    const SPOTIFY_MAX_LIKED_IMPORT = 500;
-    const SPOTIFY_MAX_PLAYLISTS_IMPORT = 30;
-    const SPOTIFY_MAX_PLAYLIST_TRACKS_IMPORT = 200;
-    const SPOTIFY_RESOLVE_BATCH_SIZE = 12;
-    const SPOTIFY_PREFETCH_CONCURRENCY = 4;
     let playRequestToken = 0;
     let autoSkipAttempts = 0;
-    let spotifyAllTimePoolCache = null;
 
     function getQueuePlaylistKey(plIndex) {
         const pl = playlists[plIndex];
@@ -2487,6 +2457,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return idx;
     }
 
+    function cleanMetadataString(str) {
+        if (!str) return '';
+        return str
+            .replace(/\s*[\(\[][^)]*?(remix|lrc|lyrical|audio|video|official|film|from|feat|ft|cover|tribute|karaoke|version|mix)[^)]*?[\)\]]/gi, '')
+            .replace(/\s*[\(\[][^)]*?(movie|soundtrack|original|hits|pop|series|bgm)[^)]*?[\)\]]/gi, '')
+            .replace(/\s*-\s*(remix|lrc|lyrical|audio|video|official|film|from|feat|ft|cover|tribute|karaoke|movie|soundtrack|version|mix|original).*/gi, '')
+            .trim();
+    }
+
     function normalizeSearchText(value) {
         return (value || '')
             .toLowerCase()
@@ -2517,11 +2496,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!track) return 0;
         const targetTitle = normalizeSearchText(item.name);
         const sourceTitle = normalizeSearchText(track.name);
+        
+        // Spaceless comparison for joined words (e.g. churake vs chura ke)
+        const targetSpaceless = targetTitle.replace(/\s+/g, '');
+        const sourceSpaceless = sourceTitle.replace(/\s+/g, '');
+        
         const titleTokensScore = scoreTokenOverlap(tokenSet(item.name), tokenSet(track.name));
         let titleScore = titleTokensScore;
-        if (sourceTitle === targetTitle) titleScore = 1;
-        else if (sourceTitle.includes(targetTitle) || targetTitle.includes(sourceTitle)) {
-            titleScore = Math.max(titleScore, 0.85);
+        
+        if (sourceTitle === targetTitle || sourceSpaceless === targetSpaceless) {
+            titleScore = 1.0;
+        } else if (sourceTitle.includes(targetTitle) || targetTitle.includes(sourceTitle) || 
+                   sourceSpaceless.includes(targetSpaceless) || targetSpaceless.includes(sourceSpaceless)) {
+            titleScore = Math.max(titleScore, 0.88);
         }
 
         const artistTarget = item.artist.split(',').map(a => a.trim()).filter(Boolean);
@@ -2531,7 +2518,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tokenSet(artistSource.join(' '))
         );
 
-        return (titleScore * 0.75) + (artistScore * 0.25);
+        return (titleScore * 0.70) + (artistScore * 0.30);
     }
 
     function pickCuratedMatch(tracks, item) {
@@ -2616,23 +2603,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const finalTracks = resolved.length ? resolved : [];
         if (finalTracks?.length) setCachedCuratedTracks(finalTracks);
         return finalTracks;
-    }
-
-    async function getSpotifyAllTimePool() {
-        if (spotifyAllTimePoolCache?.length) return spotifyAllTimePoolCache;
-        const homeCached = readHomeFeedCache();
-        if (homeCached?.trending?.length >= 12) {
-            spotifyAllTimePoolCache = organizeTracksForSelection(homeCached.trending, 40);
-            return spotifyAllTimePoolCache;
-        }
-        const curatedCached = getCachedCuratedTracks();
-        if (curatedCached?.length >= 12) {
-            spotifyAllTimePoolCache = organizeTracksForSelection(curatedCached, 40);
-            return spotifyAllTimePoolCache;
-        }
-        const tracks = await fetchCuratedTrendingTracks(24);
-        spotifyAllTimePoolCache = organizeTracksForSelection(tracks, 40);
-        return spotifyAllTimePoolCache;
     }
 
     function readHomeFeedCache() {
@@ -2864,904 +2834,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return added;
     }
 
-    function isSpotifyConfigured() {
-        return !!SPOTIFY_CLIENT_ID;
-    }
-
-    function getSpotifyRedirectUri() {
-        const origin = location.origin;
-        const path = location.pathname || '';
-        if (path === '/app' || path.startsWith('/app/')) {
-            return `${origin}/app`;
-        }
-        if (origin.includes('palmplay-music.vercel.app')) {
-            return `${origin}/app`;
-        }
-        return `${origin}/pamplay-frontend/home.html`;
-    }
-
-    function getSpotifyRedirectUriForExchange() {
-        try {
-            const saved = localStorage.getItem(SPOTIFY_REDIRECT_URI_KEY);
-            if (saved) return saved;
-        } catch {
-            // ignore
-        }
-        return getSpotifyRedirectUri();
-    }
-
-    function loadSpotifyTokens() {
-        try {
-            const raw = localStorage.getItem(SPOTIFY_TOKEN_KEY);
-            const parsed = raw ? JSON.parse(raw) : null;
-            if (!parsed?.accessToken) return null;
-            return parsed;
-        } catch {
-            return null;
-        }
-    }
-
-    function saveSpotifyPkceSession(stateToken, verifier, autoImport = true) {
-        sessionStorage.setItem(SPOTIFY_PKCE_STATE_KEY, stateToken);
-        sessionStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, verifier);
-        sessionStorage.setItem(SPOTIFY_AUTO_IMPORT_KEY, autoImport ? '1' : '0');
-        try {
-            localStorage.setItem(SPOTIFY_PKCE_CACHE_KEY, JSON.stringify({
-                state: stateToken,
-                verifier,
-                autoImport: !!autoImport,
-                createdAt: Date.now()
-            }));
-        } catch (e) {
-            console.warn('Spotify PKCE cache save failed', e);
-        }
-    }
-
-    function loadSpotifyPkceSession() {
-        let state = sessionStorage.getItem(SPOTIFY_PKCE_STATE_KEY);
-        let verifier = sessionStorage.getItem(SPOTIFY_PKCE_VERIFIER_KEY);
-        if (state && verifier) {
-            return { state, verifier, autoImport: sessionStorage.getItem(SPOTIFY_AUTO_IMPORT_KEY) === '1' };
-        }
-        try {
-            const raw = localStorage.getItem(SPOTIFY_PKCE_CACHE_KEY);
-            const parsed = raw ? JSON.parse(raw) : null;
-            const fresh = parsed && (Date.now() - Number(parsed.createdAt || 0)) < (30 * 60 * 1000);
-            if (!fresh || !parsed?.state || !parsed?.verifier) return null;
-            state = parsed.state;
-            verifier = parsed.verifier;
-            sessionStorage.setItem(SPOTIFY_PKCE_STATE_KEY, state);
-            sessionStorage.setItem(SPOTIFY_PKCE_VERIFIER_KEY, verifier);
-            sessionStorage.setItem(SPOTIFY_AUTO_IMPORT_KEY, parsed.autoImport ? '1' : '0');
-            return { state, verifier, autoImport: !!parsed.autoImport };
-        } catch {
-            return null;
-        }
-    }
-
-    function clearSpotifyPkceSession() {
-        sessionStorage.removeItem(SPOTIFY_PKCE_STATE_KEY);
-        sessionStorage.removeItem(SPOTIFY_PKCE_VERIFIER_KEY);
-        localStorage.removeItem(SPOTIFY_PKCE_CACHE_KEY);
-    }
-
-    function ensureSpotifyClientIdMatch() {
-        try {
-            const stored = localStorage.getItem(SPOTIFY_CLIENT_ID_STORE_KEY);
-            if (stored && stored !== SPOTIFY_CLIENT_ID) {
-                localStorage.removeItem(SPOTIFY_TOKEN_KEY);
-                clearSpotifyPkceSession();
-                sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
-            }
-            localStorage.setItem(SPOTIFY_CLIENT_ID_STORE_KEY, SPOTIFY_CLIENT_ID);
-        } catch (e) {
-            console.warn('Spotify client id check failed', e);
-        }
-    }
-
-    function saveSpotifyTokens(payload) {
-        if (!payload?.access_token) return;
-        const current = loadSpotifyTokens() || {};
-        const expiresIn = Math.max(300, Number(payload.expires_in || 3600));
-        const next = {
-            accessToken: payload.access_token,
-            refreshToken: payload.refresh_token || current.refreshToken || '',
-            expiresAt: Date.now() + ((expiresIn - 60) * 1000),
-            clientId: SPOTIFY_CLIENT_ID
-        };
-        localStorage.setItem(SPOTIFY_TOKEN_KEY, JSON.stringify(next));
-        localStorage.setItem(SPOTIFY_CLIENT_ID_STORE_KEY, SPOTIFY_CLIENT_ID);
-    }
-
-    async function getValidSpotifyAccessToken() {
-        ensureSpotifyClientIdMatch();
-        const stored = loadSpotifyTokens();
-        if (stored?.clientId && stored.clientId !== SPOTIFY_CLIENT_ID) {
-            localStorage.removeItem(SPOTIFY_TOKEN_KEY);
-            return null;
-        }
-        if (!stored) return null;
-        if (stored.accessToken && Date.now() < (stored.expiresAt || 0)) return stored.accessToken;
-        if (!stored.refreshToken) return null;
-
-        const params = new URLSearchParams({
-            grant_type: 'refresh_token',
-            refresh_token: stored.refreshToken,
-            client_id: SPOTIFY_CLIENT_ID
-        });
-        const res = await fetch('https://accounts.spotify.com/api/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: params.toString()
-        });
-        if (!res.ok) throw new Error('Spotify token refresh failed');
-        const data = await res.json();
-        saveSpotifyTokens(data);
-        return data.access_token;
-    }
-
-    async function startSpotifyConnect(autoImport = true, forcePrompt = false) {
-        if (!isSpotifyConfigured()) {
-            showToast('Spotify connect is not configured yet', 'fa-exclamation-triangle');
-            return;
-        }
-        ensureSpotifyClientIdMatch();
-        const verifier = randomToken(96);
-        const stateToken = randomToken(24);
-        const challenge = await pkceChallenge(verifier);
-        const redirectUri = getSpotifyRedirectUri();
-        try {
-            localStorage.setItem(SPOTIFY_REDIRECT_URI_KEY, redirectUri);
-        } catch (e) {
-            console.warn('Spotify redirect URI save failed', e);
-        }
-        saveSpotifyPkceSession(stateToken, verifier, autoImport);
-        const params = new URLSearchParams({
-            client_id: SPOTIFY_CLIENT_ID,
-            response_type: 'code',
-            redirect_uri: redirectUri,
-            code_challenge_method: 'S256',
-            code_challenge: challenge,
-            scope: SPOTIFY_SCOPES,
-            state: stateToken,
-            show_dialog: forcePrompt ? 'true' : 'false'
-        });
-        window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
-    }
-
-    async function handleSpotifyOAuthCallback() {
-        const params = new URLSearchParams(window.location.search);
-        const code = params.get('code');
-        const returnedState = params.get('state');
-        const error = params.get('error');
-        if (!code && !error) return false;
-
-        const clearOAuthQuery = () => {
-            history.replaceState(null, '', window.location.pathname + (window.location.hash || ''));
-        };
-
-        if (error) {
-            showToast(`Spotify auth failed: ${error}`, 'fa-exclamation-triangle');
-            clearSpotifyPkceSession();
-            sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
-            sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
-            clearOAuthQuery();
-            return true;
-        }
-
-        const pkce = loadSpotifyPkceSession();
-        const expectedState = pkce?.state || '';
-        const verifier = pkce?.verifier || '';
-        if (!expectedState || !verifier || returnedState !== expectedState) {
-            showToast('Spotify login session expired. Tap Connect once more.', 'fa-exclamation-triangle');
-            clearSpotifyPkceSession();
-            sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
-            sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
-            clearOAuthQuery();
-            return true;
-        }
-
-        const redirectUri = getSpotifyRedirectUriForExchange();
-        const tokenParams = new URLSearchParams({
-            client_id: SPOTIFY_CLIENT_ID,
-            grant_type: 'authorization_code',
-            code,
-            redirect_uri: redirectUri,
-            code_verifier: verifier
-        });
-        const res = await fetch('https://accounts.spotify.com/api/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: tokenParams.toString()
-        });
-        if (!res.ok) {
-            let detail = 'Spotify connection failed';
-            try {
-                const body = await res.json();
-                if (body?.error_description) detail = body.error_description;
-                else if (body?.error) detail = String(body.error);
-            } catch {
-                // ignore
-            }
-            console.warn('Spotify token exchange failed', detail, { redirectUri });
-            showToast(detail, 'fa-exclamation-triangle');
-            clearSpotifyPkceSession();
-            sessionStorage.removeItem(SPOTIFY_AUTO_IMPORT_KEY);
-            clearOAuthQuery();
-            return true;
-        }
-        const payload = await res.json();
-        saveSpotifyTokens(payload);
-        clearSpotifyPkceSession();
-        sessionStorage.removeItem(SPOTIFY_FORBIDDEN_RETRY_KEY);
-        if (pkce?.autoImport) sessionStorage.setItem(SPOTIFY_AUTO_IMPORT_KEY, '1');
-        clearOAuthQuery();
-        showToast('Spotify connected', 'fa-check-circle');
-        return true;
-    }
-
-    function isSpotifyForbiddenError(err) {
-        const msg = (err?.message || '').toLowerCase();
-        return /\b403\b/.test(msg) || msg.includes('forbidden');
-    }
-
-    async function trySpotifyReconnectOnForbidden() {
-        // Never auto-redirect to Spotify again in the same session — that caused Agree loops.
-        return false;
-    }
-
-    async function spotifyApiGet(path) {
-        const token = await getValidSpotifyAccessToken();
-        if (!token) throw new Error('Spotify not connected');
-        const url = path.startsWith('http')
-            ? path
-            : `https://api.spotify.com${path.startsWith('/') ? path : `/${path}`}`;
-        for (let attempt = 0; attempt < 3; attempt++) {
-            const res = await fetch(url, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
-            if (res.ok) return res.json();
-            if (res.status === 401) {
-                localStorage.removeItem(SPOTIFY_TOKEN_KEY);
-                throw new Error('Spotify auth expired');
-            }
-            const retriable = res.status === 429 || res.status >= 500;
-            if (!retriable || attempt === 2) {
-                let detail = '';
-                try {
-                    const body = await res.json();
-                    const message = body?.error?.message || body?.error_description || '';
-                    const statusFromBody = body?.error?.status;
-                    if (statusFromBody || message) {
-                        detail = `${statusFromBody || res.status}${message ? `: ${message}` : ''}`;
-                    }
-                } catch {
-                    detail = '';
-                }
-                throw new Error(`Spotify API failed ${detail || `${res.status} ${res.statusText}`.trim()}`);
-            }
-            const backoffMs = 450 * (attempt + 1);
-            await new Promise((resolve) => setTimeout(resolve, backoffMs));
-        }
-        throw new Error('Spotify API failed');
-    }
-
-    async function spotifyPaginate(path, itemsKey = 'items', pageLimit = 200, maxItems = Infinity) {
-        let next = path;
-        const all = [];
-        let guard = 0;
-        while (next && guard < pageLimit) {
-            guard += 1;
-            const data = await spotifyApiGet(next);
-            const items = Array.isArray(data?.[itemsKey]) ? data[itemsKey] : [];
-            all.push(...items);
-            if (all.length >= maxItems) {
-                all.length = Math.min(all.length, maxItems);
-                break;
-            }
-            next = data?.next || null;
-        }
-        return all;
-    }
-
-    async function mapConcurrent(items, concurrency, mapper) {
-        const out = new Array(items.length);
-        let cursor = 0;
-        const workers = Array.from({ length: Math.max(1, Math.min(concurrency, items.length || 1)) }, async () => {
-            while (cursor < items.length) {
-                const i = cursor++;
-                out[i] = await mapper(items[i], i);
-            }
-        });
-        await Promise.all(workers);
-        return out;
-    }
-
-    function spotifyPlaylistRowToTrack(row) {
-        return row?.item || row?.track || null;
-    }
-
-    function spotifyTrackToEntry(track) {
-        const resolved = track?.linked_from?.id ? track.linked_from : track;
-        if (!resolved?.name) return null;
-        if (resolved.type && resolved.type !== 'track') return null;
-        if (resolved.is_local) return null;
-        const artists = Array.isArray(resolved.artists) ? resolved.artists.map(a => a?.name).filter(Boolean).join(', ') : '';
-        return {
-            name: resolved.name,
-            artist: artists
-        };
-    }
-
-    async function spotifyPlaylistEntriesPaginate(playlistId, maxItems = SPOTIFY_MAX_PLAYLIST_TRACKS_IMPORT) {
-        try {
-            const rows = await spotifyPaginate(
-                `/v1/playlists/${encodeURIComponent(playlistId)}/items?limit=100`,
-                'items',
-                30,
-                maxItems
-            );
-            return rows.map(spotifyPlaylistRowToTrack).map(spotifyTrackToEntry).filter(Boolean);
-        } catch (err) {
-            const msg = (err?.message || '').toLowerCase();
-            if (!msg.includes('404') && !msg.includes('not found')) throw err;
-            const legacyRows = await spotifyPaginate(
-                `/v1/playlists/${encodeURIComponent(playlistId)}/tracks?limit=100`,
-                'items',
-                30,
-                maxItems
-            );
-            return legacyRows.map(spotifyPlaylistRowToTrack).map(spotifyTrackToEntry).filter(Boolean);
-        }
-    }
-
-    function dedupeImportEntries(entries) {
-        const seen = new Set();
-        return entries.filter((entry) => {
-            const key = `${normalizeTitleKey(entry?.name)}::${primaryArtistKey(entry?.artist)}`;
-            if (!entry?.name || seen.has(key)) return false;
-            seen.add(key);
-            return true;
-        });
-    }
-
-    function formatImportEntryLabel(entry) {
-        if (!entry) return 'Unknown track';
-        const name = (entry.name || '').trim();
-        const artist = (entry.artist || '').trim();
-        return artist ? `${name} — ${artist}` : name;
-    }
-
-    async function resolveEntriesToTracks(entries, maxEntries = 350, lookupCache = new Map()) {
-        const capped = dedupeImportEntries(entries).slice(0, maxEntries);
-        const out = [];
-        let misses = 0;
-        const missingEntries = [];
-        const batch = SPOTIFY_RESOLVE_BATCH_SIZE;
-        for (let i = 0; i < capped.length; i += batch) {
-            const chunk = capped.slice(i, i + batch);
-            const resolved = await Promise.all(chunk.map(async (entry) => {
-                const cacheKey = `${normalizeTitleKey(entry?.name)}::${primaryArtistKey(entry?.artist)}`;
-                if (lookupCache.has(cacheKey)) {
-                    const cached = lookupCache.get(cacheKey);
-                    return { entry, track: cached.track, reason: cached.reason || '' };
-                }
-                try {
-                    const track = await resolveImportedTrack(entry);
-                    const payload = { track, reason: track ? '' : 'No match in catalog' };
-                    lookupCache.set(cacheKey, payload);
-                    return { entry, track: payload.track, reason: payload.reason };
-                } catch {
-                    const payload = { track: null, reason: 'Lookup failed' };
-                    lookupCache.set(cacheKey, payload);
-                    return { entry, track: payload.track, reason: payload.reason };
-                }
-            }));
-            resolved.forEach(({ entry, track, reason }) => {
-                if (track) {
-                    out.push(track);
-                } else {
-                    misses += 1;
-                    missingEntries.push({
-                        label: formatImportEntryLabel(entry),
-                        reason
-                    });
-                }
-            });
-        }
-        return { tracks: out, misses, missingEntries };
-    }
-
-    async function importEntriesAsPlaylist(entries, playlistName, lookupCache = new Map()) {
-        const plIndex = await createUserPlaylist(playlistName, { silent: true });
-        if (plIndex < 0) {
-            return {
-                added: 0,
-                misses: entries.length,
-                missingEntries: entries.map((entry) => ({
-                    label: formatImportEntryLabel(entry),
-                    reason: 'Playlist creation failed'
-                }))
-            };
-        }
-        const { tracks, misses, missingEntries } = await resolveEntriesToTracks(entries, 350, lookupCache);
-        const added = await addTracksToUserPlaylistBatch(plIndex, tracks, {
-            suppressUiRefresh: true,
-            suppressCloudSync: true
-        });
-        return { plIndex, added, misses, missingEntries };
-    }
-
-    function showTransferProgressModal() {
-        const container = document.getElementById('modal-container');
-        const titleEl = document.getElementById('modal-title');
-        const messageEl = document.getElementById('modal-message');
-        const inputEl = document.getElementById('modal-input');
-        const confirmBtn = document.getElementById('modal-confirm');
-        const cancelBtn = document.getElementById('modal-cancel');
-        if (!container || !titleEl || !messageEl || !inputEl || !confirmBtn || !cancelBtn) return;
-
-        titleEl.textContent = 'Transfer My Music';
-        messageEl.innerHTML = `
-            <div class="transfer-flow">
-                <div class="transfer-flow-icon"><i class="fas fa-compact-disc"></i></div>
-                <div class="transfer-flow-title" id="transfer-flow-title">Preparing transfer...</div>
-                <div class="transfer-flow-sub" id="transfer-flow-sub">Please keep this screen open.</div>
-                <div class="transfer-flow-progress">
-                    <div class="transfer-flow-progress-fill" id="transfer-flow-progress-fill"></div>
-                </div>
-            </div>
-        `;
-        inputEl.style.display = 'none';
-        confirmBtn.style.display = 'none';
-        cancelBtn.style.display = 'inline-flex';
-        cancelBtn.textContent = 'Close';
-        cancelBtn.onclick = () => {
-            container.style.display = 'none';
-        };
-        container.style.display = 'flex';
-    }
-
-    function updateTransferProgress(title, subtitle, percent = null) {
-        const t = document.getElementById('transfer-flow-title');
-        const s = document.getElementById('transfer-flow-sub');
-        const fill = document.getElementById('transfer-flow-progress-fill');
-        if (t) t.textContent = title || 'Working...';
-        if (s) s.textContent = subtitle || '';
-        if (fill && percent != null && Number.isFinite(percent)) {
-            fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-        }
-    }
-
-    function finishTransferProgress({
-        added = 0,
-        misses = 0,
-        playlists = 0,
-        plIndex = -1,
-        logs = [],
-        status = 'success',
-        title = '',
-        subtitle = '',
-        autoExpandLogs = false
-    }) {
-        const iconWrap = document.querySelector('.transfer-flow-icon');
-        const messageEl = document.getElementById('modal-message');
-        const isError = status === 'error' || (added === 0 && status !== 'success');
-        const isWarning = status === 'warning' || (added === 0 && misses > 0);
-        if (iconWrap) {
-            iconWrap.innerHTML = isError
-                ? '<i class="fas fa-exclamation-circle"></i>'
-                : isWarning
-                    ? '<i class="fas fa-exclamation-triangle"></i>'
-                    : '<i class="fas fa-check-circle"></i>';
-        }
-        const resultTitle = title || (added > 0 ? `Imported ${added} songs` : 'Imported 0 songs');
-        const resultSubtitle = subtitle || (
-            added > 0
-                ? (misses ? `${misses} songs were not available in our catalog.` : 'Everything found was imported.')
-                : (misses
-                    ? `Found songs on Spotify but none could be added (${misses} unavailable in catalog).`
-                    : (logs.length
-                        ? 'Spotify connected but your library could not be loaded. See logs below.'
-                        : 'No liked songs or playlists were found on this Spotify account.'))
-        );
-        updateTransferProgress(resultTitle, resultSubtitle, 100);
-
-        if (messageEl) {
-            const footer = document.createElement('div');
-            footer.className = 'transfer-flow-result';
-            footer.innerHTML = `
-                <div><strong>${playlists}</strong> playlists created</div>
-                <div><strong>${added}</strong> tracks added</div>
-                <div><strong>${misses}</strong> unavailable</div>
-                <button type="button" class="transfer-open-btn" id="transfer-open-btn" ${plIndex < 0 ? 'disabled' : ''}>Open Imported Library</button>
-                <button type="button" class="transfer-log-toggle" id="transfer-log-toggle">View Transfer Logs</button>
-                <div class="transfer-log-panel" id="transfer-log-panel" ${autoExpandLogs || (added === 0 && logs.length) ? '' : 'hidden'}>
-                    <div class="transfer-log-head">
-                        <span>Transfer details</span>
-                        <button type="button" class="transfer-log-copy" id="transfer-log-copy">Copy logs</button>
-                    </div>
-                    <div class="transfer-log-list" id="transfer-log-list"></div>
-                </div>
-            `;
-            messageEl.appendChild(footer);
-            document.getElementById('transfer-open-btn')?.addEventListener('click', () => {
-                if (plIndex < 0) return;
-                showPlaylist(plIndex);
-                const container = document.getElementById('modal-container');
-                if (container) container.style.display = 'none';
-            });
-            const logBtn = document.getElementById('transfer-log-toggle');
-            const logPanel = document.getElementById('transfer-log-panel');
-            const logList = document.getElementById('transfer-log-list');
-            const copyBtn = document.getElementById('transfer-log-copy');
-            const normalizedLogs = Array.isArray(logs) ? logs : [];
-            if (logList) {
-                if (!normalizedLogs.length) {
-                    logList.innerHTML = '<div class="transfer-log-empty">No issues logged for this transfer.</div>';
-                } else {
-                    logList.innerHTML = normalizedLogs.map((item) => `
-                        <div class="transfer-log-row">
-                            <div class="transfer-log-track">${escapeHtml(item.track || 'Unknown')}</div>
-                            <div class="transfer-log-meta">${escapeHtml(item.playlist || 'Library')} · ${escapeHtml(item.reason || 'Unavailable')}</div>
-                        </div>
-                    `).join('');
-                }
-            }
-            if (logBtn && logPanel) {
-                const logsVisible = !logPanel.hasAttribute('hidden');
-                logBtn.textContent = logsVisible ? 'Hide Transfer Logs' : 'View Transfer Logs';
-                logBtn.addEventListener('click', () => {
-                    const hidden = logPanel.hasAttribute('hidden');
-                    if (hidden) {
-                        logPanel.removeAttribute('hidden');
-                        logBtn.textContent = 'Hide Transfer Logs';
-                    } else {
-                        logPanel.setAttribute('hidden', '');
-                        logBtn.textContent = 'View Transfer Logs';
-                    }
-                });
-            }
-            copyBtn?.addEventListener('click', async () => {
-                const text = normalizedLogs.length
-                    ? normalizedLogs.map((item) => `[${item.playlist || 'Library'}] ${item.track} — ${item.reason || 'Unavailable'}`).join('\n')
-                    : 'No transfer issues logged.';
-                try {
-                    await navigator.clipboard.writeText(text);
-                    showToast('Transfer logs copied', 'fa-copy');
-                } catch {
-                    showToast('Could not copy logs', 'fa-exclamation-triangle');
-                }
-            });
-        }
-    }
-
-    async function importSpotifyLibraryToPalmPlay() {
-        if (!isUserLoggedIn()) {
-            showToast('Log in to import Spotify library', 'fa-user-lock');
-            ppRoutes().go('login');
-            return { started: false, reason: 'login_required' };
-        }
-        if (!isSpotifyConfigured()) {
-            showToast('Set SPOTIFY_CLIENT_ID first', 'fa-exclamation-triangle');
-            return { started: false, reason: 'spotify_not_configured' };
-        }
-        let token = null;
-        try {
-            token = await getValidSpotifyAccessToken();
-        } catch (err) {
-            console.warn('Spotify token check failed before import', err);
-        }
-        if (!token) {
-            return { started: false, reason: 'spotify_not_connected' };
-        }
-        showTransferProgressModal();
-        updateTransferProgress('Connecting Spotify...', 'Authorizing and preparing your library import.', 6);
-        let totalAdded = 0;
-        let totalMisses = 0;
-        let lastPlaylistIndex = -1;
-        let importedPlaylistCount = 0;
-        const transferLogs = [];
-        const resolveCache = new Map();
-        const importedPlIndices = [];
-        const withErrorDetail = (baseReason, err) => {
-            const msg = (err?.message || '').trim();
-            return msg ? `${baseReason} (${msg})` : baseReason;
-        };
-        let needsSpotifyReconnect = false;
-        let spotifyFound = 0;
-        let profileName = '';
-
-        updateTransferProgress('Connecting Spotify...', 'Verifying your Spotify account.', 8);
-        try {
-            const me = await spotifyApiGet('/v1/me');
-            profileName = me?.display_name || me?.email || me?.id || '';
-            if (profileName) {
-                transferLogs.push({
-                    playlist: 'Spotify Account',
-                    track: profileName,
-                    reason: 'Connected successfully'
-                });
-            }
-        } catch (err) {
-            console.warn('Spotify profile fetch failed', err);
-            if (isSpotifyForbiddenError(err)) needsSpotifyReconnect = true;
-            transferLogs.push({
-                playlist: 'Spotify Account',
-                track: '(profile)',
-                reason: withErrorDetail('Could not verify Spotify profile', err)
-            });
-        }
-
-        updateTransferProgress('Importing liked songs...', 'Fetching your Spotify liked songs.', 15);
-        let likedEntries = [];
-        let likedRawCount = 0;
-        try {
-            const savedItems = await spotifyPaginate('/v1/me/tracks?limit=50', 'items', 60, SPOTIFY_MAX_LIKED_IMPORT);
-            likedRawCount = savedItems.length;
-            likedEntries = savedItems
-                .map(item => spotifyTrackToEntry(item?.track))
-                .filter(Boolean);
-            spotifyFound += likedEntries.length;
-            if (likedRawCount > 0 && !likedEntries.length) {
-                transferLogs.push({
-                    playlist: 'Spotify Liked Songs',
-                    track: '(batch)',
-                    reason: `${likedRawCount} saved items found but none were playable music tracks`
-                });
-            }
-        } catch (err) {
-            console.warn('Spotify liked fetch failed', err);
-            if (isSpotifyForbiddenError(err)) needsSpotifyReconnect = true;
-            transferLogs.push({
-                playlist: 'Spotify Liked Songs',
-                track: '(batch)',
-                reason: withErrorDetail('Could not fetch liked songs this run', err)
-            });
-        }
-
-        updateTransferProgress('Importing playlists...', 'Reading your Spotify playlists.', 24);
-        let playlistsMeta = [];
-        try {
-            playlistsMeta = await spotifyPaginate('/v1/me/playlists?limit=50', 'items', 40, SPOTIFY_MAX_PLAYLISTS_IMPORT);
-            if (playlistsMeta.length) {
-                transferLogs.push({
-                    playlist: 'Spotify Playlists',
-                    track: '(summary)',
-                    reason: `Found ${playlistsMeta.length} playlists`
-                });
-            }
-        } catch (err) {
-            console.warn('Spotify playlist list fetch failed', err);
-            if (isSpotifyForbiddenError(err)) needsSpotifyReconnect = true;
-            transferLogs.push({
-                playlist: 'Spotify Playlists',
-                track: '(batch)',
-                reason: withErrorDetail('Could not fetch playlist list this run', err)
-            });
-        }
-
-        updateTransferProgress('Importing saved albums...', 'Reading albums saved to your Spotify library.', 32);
-        let albumPlaylistEntries = [];
-        try {
-            const savedAlbums = await spotifyPaginate('/v1/me/albums?limit=50', 'items', 20, 15);
-            savedAlbums.forEach((item) => {
-                const album = item?.album;
-                const albumName = album?.name || 'Saved Album';
-                const tracks = Array.isArray(album?.tracks?.items) ? album.tracks.items : [];
-                const entries = tracks.map(spotifyTrackToEntry).filter(Boolean);
-                if (entries.length) {
-                    albumPlaylistEntries.push({ name: `${albumName} (Spotify Album)`, entries });
-                    spotifyFound += entries.length;
-                }
-            });
-            if (albumPlaylistEntries.length) {
-                transferLogs.push({
-                    playlist: 'Spotify Albums',
-                    track: '(summary)',
-                    reason: `Found ${albumPlaylistEntries.length} saved albums with tracks`
-                });
-            }
-        } catch (err) {
-            console.warn('Spotify albums fetch failed', err);
-            if (isSpotifyForbiddenError(err)) needsSpotifyReconnect = true;
-            transferLogs.push({
-                playlist: 'Spotify Albums',
-                track: '(batch)',
-                reason: withErrorDetail('Could not fetch saved albums this run', err)
-            });
-        }
-
-        if (needsSpotifyReconnect && !likedEntries.length && !playlistsMeta.length && !albumPlaylistEntries.length) {
-            showToast('Spotify access denied. Add your account in Spotify Developer Users and Access.', 'fa-exclamation-triangle');
-            finishTransferProgress({
-                added: 0,
-                misses: 0,
-                playlists: 0,
-                plIndex: -1,
-                logs: transferLogs,
-                status: 'error',
-                title: 'Spotify library blocked',
-                subtitle: profileName
-                    ? `Signed in as ${profileName}, but Spotify returned 403. Reconnect Spotify once, and confirm this exact email is in Developer Dashboard → Users and Access for app PalmPlay.`
-                    : 'Spotify returned 403. Disconnect and reconnect Spotify, then confirm your email is in Developer Dashboard → Users and Access.',
-                autoExpandLogs: true
-            });
-            return { started: true, blocked403: true, added: 0, misses: 0, playlists: 0 };
-        }
-
-        if (likedEntries.length) {
-            updateTransferProgress('Matching tracks...', 'Matching liked songs in PalmPlay catalog.', 36);
-            try {
-                const likedResult = await importEntriesAsPlaylist(
-                    likedEntries,
-                    `Spotify Liked Songs ${new Date().toLocaleDateString()}`,
-                    resolveCache
-                );
-                totalAdded += likedResult.added || 0;
-                totalMisses += likedResult.misses || 0;
-                lastPlaylistIndex = likedResult.plIndex ?? lastPlaylistIndex;
-                if ((likedResult.added || 0) > 0) importedPlaylistCount += 1;
-                if (typeof likedResult.plIndex === 'number') importedPlIndices.push(likedResult.plIndex);
-                (likedResult.missingEntries || []).forEach((miss) => {
-                    transferLogs.push({
-                        playlist: 'Spotify Liked Songs',
-                        track: miss.label,
-                        reason: miss.reason
-                    });
-                });
-            } catch (err) {
-                console.warn('Liked import failed', err);
-                transferLogs.push({
-                    playlist: 'Spotify Liked Songs',
-                    track: '(batch)',
-                    reason: withErrorDetail('Could not import liked songs this run', err)
-                });
-            }
-        }
-
-        updateTransferProgress('Preparing playlists...', 'Fetching playlist tracks in parallel.', 40);
-        const prefetchedPlaylists = await mapConcurrent(
-            playlistsMeta,
-            SPOTIFY_PREFETCH_CONCURRENCY,
-            async (pl) => {
-                if (!pl?.id || !pl?.name) return { pl, entries: [], failed: false, error: null };
-                try {
-                    const entries = await spotifyPlaylistEntriesPaginate(pl.id, SPOTIFY_MAX_PLAYLIST_TRACKS_IMPORT);
-                    return { pl, entries, failed: false, error: null };
-                } catch (err) {
-                    console.warn('Playlist prefetch failed', pl.name, err);
-                    return { pl, entries: [], failed: true, error: err };
-                }
-            }
-        );
-
-        const totalPlaylists = Math.max(1, prefetchedPlaylists.length);
-        for (let idx = 0; idx < prefetchedPlaylists.length; idx++) {
-            const { pl, entries, failed, error } = prefetchedPlaylists[idx];
-            if (!pl?.name) continue;
-            const pct = 48 + Math.round((idx / totalPlaylists) * 36);
-            updateTransferProgress(`Importing "${pl.name}"`, 'Matching tracks and creating playlist.', pct);
-            if (failed) {
-                transferLogs.push({
-                    playlist: pl.name,
-                    track: '(batch)',
-                    reason: withErrorDetail('Could not fetch this playlist this run', error)
-                });
-                continue;
-            }
-            if (!entries.length) continue;
-            spotifyFound += entries.length;
-            try {
-                const result = await importEntriesAsPlaylist(entries, `${pl.name} (Spotify)`, resolveCache);
-                totalAdded += result.added || 0;
-                totalMisses += result.misses || 0;
-                if (typeof result.plIndex === 'number') lastPlaylistIndex = result.plIndex;
-                if ((result.added || 0) > 0) importedPlaylistCount += 1;
-                if (typeof result.plIndex === 'number') importedPlIndices.push(result.plIndex);
-                (result.missingEntries || []).forEach((miss) => {
-                    transferLogs.push({
-                        playlist: pl.name,
-                        track: miss.label,
-                        reason: miss.reason
-                    });
-                });
-            } catch (err) {
-                console.warn('Playlist import failed', pl.name, err);
-                transferLogs.push({
-                    playlist: pl.name,
-                    track: '(batch)',
-                    reason: withErrorDetail('Could not import this playlist this run', err)
-                });
-            }
-        }
-
-        for (const albumPl of albumPlaylistEntries) {
-            updateTransferProgress(`Importing "${albumPl.name}"`, 'Matching saved album tracks.', 88);
-            try {
-                const result = await importEntriesAsPlaylist(albumPl.entries, albumPl.name, resolveCache);
-                totalAdded += result.added || 0;
-                totalMisses += result.misses || 0;
-                if (typeof result.plIndex === 'number') lastPlaylistIndex = result.plIndex;
-                if ((result.added || 0) > 0) importedPlaylistCount += 1;
-                if (typeof result.plIndex === 'number') importedPlIndices.push(result.plIndex);
-                (result.missingEntries || []).forEach((miss) => {
-                    transferLogs.push({
-                        playlist: albumPl.name,
-                        track: miss.label,
-                        reason: miss.reason
-                    });
-                });
-            } catch (err) {
-                console.warn('Album import failed', albumPl.name, err);
-                transferLogs.push({
-                    playlist: albumPl.name,
-                    track: '(batch)',
-                    reason: withErrorDetail('Could not import saved album this run', err)
-                });
-            }
-        }
-
-        renderSidebar();
-        if (state.currentView === 'home') renderHome();
-        setTimeout(() => {
-            importedPlIndices.forEach((idx) => {
-                const pl = playlists[idx];
-                if (!pl || !isUserPlaylist(pl)) return;
-                window.PalmPlaySync?.pushPlaylist?.(pl).then(() => window.PalmPlaySync?.pushPlaylistTracks?.(pl))
-                    .catch((e) => console.warn('Cloud transfer sync', e));
-            });
-        }, 0);
-
-        if (totalAdded > 0) {
-            showToast(`Spotify imported: ${totalAdded} tracks${totalMisses ? ` (${totalMisses} unavailable)` : ''}`, 'fa-check-circle');
-            finishTransferProgress({
-                added: totalAdded,
-                misses: totalMisses,
-                playlists: importedPlaylistCount,
-                plIndex: lastPlaylistIndex,
-                logs: transferLogs
-            });
-            return {
-                started: true,
-                blocked403: false,
-                added: totalAdded,
-                misses: totalMisses,
-                playlists: importedPlaylistCount
-            };
-        } else {
-            const noSpotifyData = spotifyFound === 0 && !playlistsMeta.length && !albumPlaylistEntries.length;
-            showToast(
-                noSpotifyData
-                    ? 'No Spotify songs found to import. Check Transfer Logs.'
-                    : 'Transfer finished. No new matched songs this run.',
-                'fa-info-circle'
-            );
-            finishTransferProgress({
-                added: 0,
-                misses: totalMisses,
-                playlists: importedPlaylistCount,
-                plIndex: -1,
-                logs: transferLogs,
-                status: noSpotifyData ? 'error' : 'warning',
-                title: noSpotifyData ? 'No songs found on Spotify' : `Found ${spotifyFound} songs, added 0`,
-                subtitle: noSpotifyData
-                    ? (profileName
-                        ? `Signed in as ${profileName}. Spotify returned an empty library or blocked API access. Use TuneMyMusic fallback, or add your email in Spotify Developer → Users and Access.`
-                        : 'Spotify returned an empty library or blocked API access. Use TuneMyMusic fallback, or add your email in Spotify Developer → Users and Access.')
-                    : `${spotifyFound} songs were found on Spotify but none matched our streaming catalog.`,
-                autoExpandLogs: true
-            });
-            return {
-                started: true,
-                blocked403: needsSpotifyReconnect && !likedEntries.length && !playlistsMeta.length,
-                added: 0,
-                misses: totalMisses,
-                playlists: importedPlaylistCount
-            };
-        }
-    }
-
     let modalConfirmPrevDisplay = '';
 
     function closePlaylistPickerModal() {
@@ -3774,30 +2846,115 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function resolveImportedTrack(entry) {
+        const cleanName = cleanMetadataString(entry.name);
+        const cleanArtist = cleanMetadataString(entry.artist);
+
+        // Defined progressive queries: specific first, then general title-only
         const queries = [
-            `${entry.name} ${entry.artist || ''}`.trim(),
-            entry.name,
-            `${entry.artist || ''} ${entry.name}`.trim()
+            `${cleanName} ${cleanArtist}`.trim(),
+            cleanName
         ].filter((q, i, arr) => q && arr.indexOf(q) === i);
 
+        let bestCandidate = null;
+        let bestCandidateScore = -1;
+
         for (const query of queries) {
-            let tracks = await fetchCatalogTracks(query, 8);
+            let tracks = await fetchCatalogTracks(query, 10);
             if (!tracks.length) continue;
 
             const picked = pickCuratedMatch(tracks, {
-                name: entry.name || query,
-                artist: entry.artist || ''
+                name: cleanName,
+                artist: cleanArtist
             });
-            if (picked?.track && picked.score >= 0.25) return picked.track;
-            if (tracks[0]) return tracks[0];
+
+            if (picked?.track) {
+                // Short-circuit: if we have a very high-quality match, return it immediately to save requests
+                if (picked.score >= 0.85) {
+                    return picked.track;
+                }
+
+                // Otherwise track the best candidate found across all queries
+                if (picked.score > bestCandidateScore) {
+                    bestCandidateScore = picked.score;
+                    bestCandidate = picked.track;
+                }
+            }
+        }
+
+        // Return the best candidate if it meets the minimum threshold (e.g. 0.40)
+        if (bestCandidate && bestCandidateScore >= 0.40) {
+            return bestCandidate;
         }
         return null;
     }
 
     async function importFromApps(rawText, playlistName) {
+        const trimmed = String(rawText || '').trim();
+
+        // Direct JioSaavn Link Import Support
+        if (trimmed.startsWith('http') && (trimmed.includes('jiosaavn.com/') || trimmed.includes('saavn.com/'))) {
+            let fetchPath = null;
+            let isSingleSong = false;
+
+            if (trimmed.includes('/featured/') || trimmed.includes('/playlist/')) {
+                fetchPath = `/playlists?link=${encodeURIComponent(trimmed)}`;
+            } else if (trimmed.includes('/album/')) {
+                fetchPath = `/albums?link=${encodeURIComponent(trimmed)}`;
+            } else if (trimmed.includes('/song/')) {
+                fetchPath = `/songs?link=${encodeURIComponent(trimmed)}`;
+                isSingleSong = true;
+            }
+
+            if (fetchPath) {
+                showToast('Importing from JioSaavn link...', 'fa-spinner fa-spin');
+                try {
+                    const res = await fetch(`${MUSIC_CATALOG_API_BASE}${fetchPath}`, { signal: AbortSignal.timeout(10000) });
+                    if (!res.ok) throw new Error('API request failed');
+                    const body = await res.json();
+
+                    if (body?.success && body?.data) {
+                        let rawSongs = [];
+                        let defaultName = '';
+
+                        if (isSingleSong) {
+                            rawSongs = Array.isArray(body.data) ? body.data : [body.data];
+                            defaultName = rawSongs[0]?.name || 'Imported Song';
+                        } else {
+                            rawSongs = Array.isArray(body.data?.songs) ? body.data.songs : [];
+                            defaultName = body.data?.name || 'Imported JioSaavn Playlist';
+                        }
+
+                        const resolvedTracks = rawSongs.map(parseCatalogSong).filter(Boolean);
+                        if (!resolvedTracks.length) {
+                            showToast('No playable tracks found in that link', 'fa-exclamation-triangle');
+                            return;
+                        }
+
+                        const plName = (playlistName || '').trim() || defaultName;
+                        const plIndex = await createUserPlaylist(plName);
+                        if (plIndex < 0) return;
+
+                        const added = await addTracksToUserPlaylistBatch(plIndex, resolvedTracks);
+                        if (added > 0) {
+                            showToast(`Imported ${added} tracks from JioSaavn link!`, 'fa-check-circle');
+                            showPlaylist(plIndex);
+                        } else {
+                            showToast('Failed to add tracks to playlist', 'fa-exclamation-triangle');
+                        }
+                        return;
+                    }
+                } catch (err) {
+                    console.error('Failed to import from JioSaavn link:', err);
+                    showToast('Could not load JioSaavn link', 'fa-exclamation-triangle');
+                    return;
+                }
+            }
+        }
+
+        // Fallback: CSV or copy-pasted list text parsing
         const entries = parseImportedTrackEntries(rawText).slice(0, 80);
         if (!entries.length) {
-            showToast('Paste track list text or CSV first', 'fa-file-import');
+            showToast('Paste track list text, CSV, or a JioSaavn link first', 'fa-file-import');
             return;
         }
 
@@ -3805,15 +2962,30 @@ document.addEventListener('DOMContentLoaded', () => {
         const plIndex = await createUserPlaylist(plName);
         if (plIndex < 0) return;
 
-        const resolvedTracks = [];
-        let misses = 0;
-        for (const entry of entries) {
-            const match = await resolveImportedTrack(entry);
-            if (match) resolvedTracks.push(match);
-            else misses += 1;
-        }
+        showToast('Matching tracks in parallel...', 'fa-spinner fa-spin');
 
-        const added = await addTracksToUserPlaylistBatch(plIndex, resolvedTracks);
+        const concurrencyLimit = 4;
+        const resolvedTracks = new Array(entries.length).fill(null);
+        let cursor = 0;
+
+        const workers = Array.from({ length: Math.min(concurrencyLimit, entries.length) }, async () => {
+            while (cursor < entries.length) {
+                const index = cursor++;
+                const entry = entries[index];
+                try {
+                    const match = await resolveImportedTrack(entry);
+                    resolvedTracks[index] = match;
+                } catch (e) {
+                    console.warn('Failed to resolve entry:', entry, e);
+                }
+            }
+        });
+        await Promise.all(workers);
+
+        const finalTracks = resolvedTracks.filter(Boolean);
+        const misses = entries.length - finalTracks.length;
+
+        const added = await addTracksToUserPlaylistBatch(plIndex, finalTracks);
         if (added > 0) {
             showToast(`Imported ${added} tracks${misses ? ` (${misses} not found)` : ''}`, 'fa-check-circle');
             showPlaylist(plIndex);
@@ -3837,22 +3009,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const cancelBtn = document.getElementById('modal-cancel');
         if (!container || !titleEl || !messageEl || !inputEl || !confirmBtn || !cancelBtn) return;
 
-        titleEl.textContent = 'Import from Spotify & Apps';
+        titleEl.textContent = 'Import Playlists & Music';
         messageEl.innerHTML = `
             <div class="import-apps-panel">
-                <p>Use TuneMyMusic first for the most reliable transfer, then paste or upload your exported list below.</p>
+                <p>Paste a JioSaavn playlist/album/song URL directly for a 1-click import, or upload/paste a track list text.</p>
                 <div class="import-manual-wrap" id="import-manual-wrap">
                     <p class="import-divider"><span>recommended</span></p>
-                    <button type="button" class="import-tmm-btn" id="open-tmm-btn"><i class="fas fa-external-link-alt"></i> Open TuneMyMusic</button>
-                    <textarea id="import-tracks-text" class="import-tracks-text" placeholder="Paste exported track list here (CSV or lines like: Song, Artist)."></textarea>
+                    <textarea id="import-tracks-text" class="import-tracks-text" placeholder="Paste JioSaavn link (e.g., https://www.jiosaavn.com/featured/...) OR paste exported CSV/text list here."></textarea>
+                    <button type="button" class="import-tmm-btn" id="open-tmm-btn"><i class="fas fa-external-link-alt"></i> Open TuneMyMusic Fallback</button>
                     <label class="import-file-label">
                         <input type="file" id="import-tracks-file" accept=".txt,.csv,text/plain,text/csv">
                         <i class="fas fa-file-upload"></i> Load TXT/CSV file
                     </label>
-                </div>
-                <p class="import-divider"><span>optional</span></p>
-                <button type="button" class="import-spotify-btn" id="import-spotify-btn"><i class="fab fa-spotify"></i> Try Spotify Connect (Beta)</button>
-                <p>Use Spotify Connect only if you want direct sync and it is working on your account.</p>
                 </div>
             </div>
         `;
@@ -3864,64 +3032,12 @@ document.addEventListener('DOMContentLoaded', () => {
         cancelBtn.textContent = 'Cancel';
         container.style.display = 'flex';
 
-        const manualWrap = document.getElementById('import-manual-wrap');
         const openTuneMyMusic = () => window.open('https://www.tunemymusic.com/', '_blank', 'noopener,noreferrer');
-        const revealManualFallback = (reason, openTmm = false) => {
-            if (manualWrap?.hasAttribute('hidden')) manualWrap.removeAttribute('hidden');
-            if (reason) showToast(reason, 'fa-info-circle');
-            if (openTmm) {
-                const popup = openTuneMyMusic();
-                if (!popup) showToast('Popup blocked. Tap Open TuneMyMusic button below.', 'fa-external-link-alt');
-            }
-        };
 
         const openTmm = document.getElementById('open-tmm-btn');
         openTmm?.addEventListener('click', (e) => {
             e.preventDefault();
             openTuneMyMusic();
-        });
-        const spotifyBtn = document.getElementById('import-spotify-btn');
-        spotifyBtn?.addEventListener('click', async (e) => {
-            e.preventDefault();
-            const previousLabel = spotifyBtn.innerHTML;
-            spotifyBtn.disabled = true;
-            spotifyBtn.innerHTML = '<i class="fab fa-spotify"></i> Trying Spotify...';
-            const resetButton = () => {
-                spotifyBtn.disabled = false;
-                spotifyBtn.innerHTML = previousLabel;
-            };
-            if (!isSpotifyConfigured()) {
-                resetButton();
-                revealManualFallback('Spotify is not configured. Using TuneMyMusic fallback.', true);
-                return;
-            }
-            try {
-                const token = await getValidSpotifyAccessToken();
-                if (token) {
-                    const result = await importSpotifyLibraryToPalmPlay();
-                    if (result?.reason === 'spotify_not_connected') {
-                        resetButton();
-                        showToast('Spotify not connected. Tap the button again to authorize.', 'fa-exclamation-triangle');
-                        return;
-                    }
-                    if (result?.oauthRedirected) return;
-                    if (result?.blocked403 && (result?.added || 0) === 0) {
-                        resetButton();
-                        revealManualFallback('Spotify access blocked. Continue with TuneMyMusic fallback.', true);
-                        return;
-                    }
-                    container.style.display = 'none';
-                } else {
-                    await startSpotifyConnect(true, false);
-                    return;
-                }
-            } catch (err) {
-                console.warn('Spotify import start failed', err);
-                resetButton();
-                revealManualFallback('Could not start Spotify transfer. Continue with TuneMyMusic fallback.', true);
-                return;
-            }
-            resetButton();
         });
         const tracksTextEl = document.getElementById('import-tracks-text');
         const fileEl = document.getElementById('import-tracks-file');
@@ -5068,6 +4184,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button class="dropdown-item" onclick="handleProfileAction('support')">
                             <i class="fas fa-headset"></i> Support
                         </button>
+                        <button class="dropdown-item" onclick="handleProfileAction('tour')">
+                            <i class="fas fa-magic"></i> Quick Tour
+                        </button>
                         <button class="dropdown-item logout" onclick="handleProfileAction('logout')">
                             <i class="fas fa-sign-out-alt"></i> Log Out
                         </button>
@@ -6166,5 +5285,156 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     })();
     // ──────────────────────────────────────────────────────────────────────────
+
+    function startInteractiveTour() {
+        document.getElementById('tour-overlay')?.remove();
+        document.getElementById('tour-spotlight')?.remove();
+        document.getElementById('tour-bubble')?.remove();
+
+        const steps = [
+            {
+                title: "Welcome to PalmPlay! 🎵",
+                description: "Let's take a quick 30-second interactive tour to explore your new premium features.",
+                element: null
+            },
+            {
+                title: "Transfer & Import Music 📂",
+                description: "Click the <b>'+' (Add)</b> button here to import files, folders, or entire playlists! Paste copy-pasted track names, CSVs, or JioSaavn links to sync them in parallel.",
+                element: document.querySelector('#add-music-btn')
+            },
+            {
+                title: "Premium Search 🔍",
+                description: "Search across millions of songs. Our optimized engine automatically filters parenthetical metadata and fixes spacing/spelling mismatches on the fly.",
+                element: document.querySelector('.premium-search-input')
+            },
+            {
+                title: "Your Music Library 🎧",
+                description: "Your local files, imported playlists, and liked tracks are structured here. Play, organize, and listen offline anytime.",
+                element: document.querySelector('#local-tracks-list') || document.querySelector('.playlist-section')
+            }
+        ];
+
+        let currentStep = 0;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'tour-overlay';
+        
+        const spotlight = document.createElement('div');
+        spotlight.id = 'tour-spotlight';
+
+        const bubble = document.createElement('div');
+        bubble.id = 'tour-bubble';
+
+        document.body.appendChild(overlay);
+        document.body.appendChild(spotlight);
+        document.body.appendChild(bubble);
+
+        void overlay.offsetWidth;
+        overlay.classList.add('visible');
+
+        function updateTourStep() {
+            const step = steps[currentStep];
+            if (!step) {
+                endTour();
+                return;
+            }
+
+            bubble.innerHTML = `
+                <div class="tour-bubble-header">
+                    <span class="tour-bubble-title"><i class="fas fa-magic"></i> ${step.title}</span>
+                    <button class="tour-bubble-close" aria-label="Close tour">&times;</button>
+                </div>
+                <div class="tour-bubble-body">
+                    ${step.description}
+                </div>
+                <div class="tour-bubble-footer">
+                    <div class="tour-dots">
+                        ${steps.map((_, i) => `<span class="tour-dot ${i === currentStep ? 'active' : ''}"></span>`).join('')}
+                    </div>
+                    <div class="tour-buttons">
+                        <button class="tour-btn skip">Skip</button>
+                        ${currentStep > 0 ? '<button class="tour-btn back">Back</button>' : ''}
+                        <button class="tour-btn next">${currentStep === steps.length - 1 ? 'Finish' : 'Next'}</button>
+                    </div>
+                </div>
+            `;
+
+            bubble.querySelector('.tour-bubble-close').onclick = endTour;
+            bubble.querySelector('.tour-btn.skip').onclick = endTour;
+            if (currentStep > 0) {
+                bubble.querySelector('.tour-btn.back').onclick = () => {
+                    currentStep--;
+                    updateTourStep();
+                };
+            }
+            bubble.querySelector('.tour-btn.next').onclick = () => {
+                currentStep++;
+                updateTourStep();
+            };
+
+            if (step.element) {
+                const targetEl = step.element;
+                const rect = targetEl.getBoundingClientRect();
+                
+                spotlight.style.display = 'block';
+                spotlight.style.top = `${rect.top - 6}px`;
+                spotlight.style.left = `${rect.left - 6}px`;
+                spotlight.style.width = `${rect.width + 12}px`;
+                spotlight.style.height = `${rect.height + 12}px`;
+
+                bubble.style.top = 'auto';
+                bubble.style.bottom = 'auto';
+                bubble.style.left = 'auto';
+                bubble.style.right = 'auto';
+                bubble.style.transform = 'none';
+
+                const bubbleHeight = 160;
+                const bubbleWidth = 320;
+
+                if (rect.top > bubbleHeight + 40) {
+                    bubble.style.top = `${rect.top - bubbleHeight - 15}px`;
+                    bubble.style.left = `${Math.max(16, rect.left + rect.width/2 - bubbleWidth/2)}px`;
+                } else {
+                    bubble.style.top = `${rect.bottom + 15}px`;
+                    bubble.style.left = `${Math.max(16, rect.left + rect.width/2 - bubbleWidth/2)}px`;
+                }
+
+                const leftVal = parseFloat(bubble.style.left);
+                if (leftVal + bubbleWidth > window.innerWidth) {
+                    bubble.style.left = `${window.innerWidth - bubbleWidth - 16}px`;
+                }
+            } else {
+                spotlight.style.display = 'none';
+                bubble.style.top = '50%';
+                bubble.style.left = '50%';
+                bubble.style.transform = 'translate(-50%, -50%)';
+            }
+
+            bubble.classList.add('visible');
+        }
+
+        function endTour() {
+            overlay.classList.remove('visible');
+            bubble.classList.remove('visible');
+            setTimeout(() => {
+                overlay.remove();
+                spotlight.remove();
+                bubble.remove();
+                localStorage.setItem('palmplay_tour_completed', 'true');
+            }, 400);
+        }
+
+        updateTourStep();
+    }
+    window.startInteractiveTour = startInteractiveTour;
+
+    // Trigger tour automatically for new users after a small delay
+    if (localStorage.getItem('palmplay_tour_completed') !== 'true') {
+        setTimeout(() => {
+            if (state.currentView === 'home') {
+                startInteractiveTour();
+            }
+        }, 2000);
+    }
 });
 
