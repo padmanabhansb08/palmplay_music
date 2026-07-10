@@ -271,6 +271,15 @@ body.player-bar-hidden #app {
     transition: var(--transition-fast);
 }
 
+@media (max-width: 768px) {
+    .playlist-item {
+        min-height: 64px;
+        display: flex;
+        align-items: center;
+        padding: 12px 16px;
+    }
+}
+
 .playlist-item:hover {
     color: var(--text-bright);
     background: rgba(255, 255, 255, 0.05);
@@ -1095,6 +1104,12 @@ body.player-bar-hidden .player-bar {
     font-size: 14px;
 }
 
+@media (max-width: 480px) {
+    .track-row td {
+        padding: 16px;
+    }
+}
+
 .row-art {
     width: 40px;
     height: 40px;
@@ -1222,6 +1237,15 @@ body.player-bar-hidden .player-bar {
     text-align: center;
     box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6);
     animation: modalIn 0.4s var(--ease-smooth);
+}
+
+@media (max-width: 480px) {
+    #custom-modal {
+        max-width: calc(100vw - 32px);
+        margin: auto;
+        padding: 24px 20px;
+        border-radius: 24px;
+    }
 }
 
 #modal-title {

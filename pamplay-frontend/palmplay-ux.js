@@ -206,11 +206,7 @@
                         return;
                     }
                     if (key === 'library') {
-                        document.querySelector('.sidebar')?.classList.add('open');
-                        document.getElementById('sidebar-overlay')?.classList.add('visible');
-                        const lib = document.querySelector('.library-header');
-                        if (lib) lib.scrollIntoView({ behavior: 'smooth' });
-                        document.querySelector('.playlist-item')?.click();
+                        window.PalmPlayNav?.go('library');
                     }
                 });
             });

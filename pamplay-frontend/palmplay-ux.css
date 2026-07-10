@@ -431,10 +431,39 @@ body.player-expanded .player-bar {
     letter-spacing: 0.02em;
     cursor: pointer;
     transition: color 0.2s ease;
+    position: relative;
+    min-width: 56px;
 }
 
 .bottom-nav-item i {
     font-size: 20px;
+    position: relative;
+    z-index: 1;
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bottom-nav-item span {
+    position: relative;
+    z-index: 1;
+}
+
+/* Pill indicator behind active icon */
+.bottom-nav-item::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%) scaleX(0);
+    width: 56px;
+    height: 32px;
+    border-radius: 16px;
+    background: rgba(255, 40, 40, 0.15);
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s;
+    z-index: 0;
+}
+
+.bottom-nav-item.active::before {
+    transform: translateX(-50%) scaleX(1);
 }
 
 .bottom-nav-item.active {
@@ -443,6 +472,12 @@ body.player-expanded .player-bar {
 
 .bottom-nav-item.active i {
     color: var(--primary);
+    transform: translateY(-1px) scale(1.1);
+}
+
+/* Tap feedback */
+.bottom-nav-item:active i {
+    transform: scale(0.88);
 }
 
 /* ─── Now Playing (Gap 4 — full screen) ─── */
@@ -1593,25 +1628,94 @@ body.now-playing-open {
     }
 
     .player-bar {
-        grid-template-columns: 1fr;
-        grid-template-rows: auto auto;
-        height: auto;
-        min-height: var(--player-height);
-        padding: 10px 12px 12px;
-        gap: 8px;
+        /* Mobile mini-player: single row with art + info + controls */
+        display: flex !important;
+        flex-direction: row;
+        align-items: center;
+        height: 64px !important;
+        min-height: 64px;
+        padding: 0 12px 0 8px;
+        gap: 0;
+        border-top-left-radius: 16px;
+        border-top-right-radius: 16px;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        cursor: pointer;
     }
 
-    .player-section--center {
-        order: -1;
-        width: 100%;
+    /* Show album art thumbnail in mini player */
+    .player-bar .album-art {
+        display: block !important;
+        width: 44px !important;
+        height: 44px !important;
+        flex-shrink: 0;
+        border-radius: 8px;
+        margin-right: 10px;
     }
 
     .player-section--left {
-        width: 100%;
+        display: flex;
+        align-items: center;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .player-section--center {
+        flex-shrink: 0;
+        order: unset;
+        width: auto;
+        padding: 0;
     }
 
     .player-section--right {
         display: none;
+    }
+
+    /* Hide progress row on mini player — shown in Now Playing panel */
+    .player-bar .progress-row {
+        display: none !important;
+    }
+
+    /* Thin progress line at very top of player bar */
+    .player-bar::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: var(--mini-progress, 0%);
+        height: 2px;
+        background: var(--primary);
+        border-radius: 0 2px 0 0;
+        transition: width 0.1s linear;
+    }
+
+    /* Up-chevron expand hint */
+    .player-bar::after {
+        content: '';
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 36px;
+        height: 3px;
+        border-radius: 2px;
+        background: rgba(255,255,255,0.18);
+    }
+
+    /* Show only play and next buttons in mini player controls */
+    .player-bar .control-buttons .fa-random,
+    .player-bar .control-buttons .fa-step-backward,
+    .player-bar .control-buttons .fa-redo-alt {
+        display: none !important;
+    }
+
+    .player-bar .control-buttons {
+        gap: 12px;
+    }
+
+    /* Don't show volume controls on mobile */
+    .volume-controls.mobile-hide,
+    .player-bar .volume-controls {
+        display: none !important;
     }
 
     .volume-controls.mobile-hide {
@@ -1644,6 +1748,14 @@ body.now-playing-open {
         grid-column: 2;
         grid-row: 1;
         gap: 6px;
+        /* Hide nav history buttons on mobile — unused in SPA context */
+        display: none !important;
+    }
+
+    /* Extend sidebar-toggle to fill the gap left by hiding header-history */
+    .top-header .sidebar-toggle {
+        grid-column: 1 / 3;
+        grid-row: 1;
     }
 
     .header-fwd--hide-mobile {
@@ -1786,19 +1898,13 @@ body.now-playing-open {
         padding: 0;
         justify-content: center;
     }
-}
 
-@media (max-width: 480px) {
     .hero-title {
         font-size: 24px !important;
     }
 
     .control-buttons {
         gap: 16px !important;
-    }
-
-    .now-playing-art {
-        width: min(280px, 85vw);
     }
 
     .lang-mood-chips-row {
@@ -1810,7 +1916,32 @@ body.now-playing-open {
     }
 
     #app {
-        padding-bottom: calc(120px + var(--bottom-nav-height) + var(--safe-bottom));
+        padding-bottom: calc(80px + var(--bottom-nav-height) + var(--safe-bottom));
+    }
+
+    /* Now Playing: larger play button, better spacing on tiny screens */
+    .now-playing-controls .play-pause-btn {
+        width: 72px !important;
+        height: 72px !important;
+        font-size: 28px !important;
+    }
+
+    .now-playing-art {
+        width: min(280px, 82vw);
+        margin-bottom: 20px;
+    }
+
+    #np-title {
+        font-size: clamp(20px, 5vw, 28px);
+    }
+
+    /* Home hero: prevent text clipping on tiny screens */
+    .home-hero {
+        min-height: 160px !important;
+    }
+
+    .greeting {
+        font-size: clamp(22px, 6vw, 32px) !important;
     }
 }
 

@@ -578,7 +578,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderHome(); // Back to main view
             } catch (err) {
                 console.error("Delete failed:", err);
-                showToast("Failed to delete", 'fa-exclamation-triangle');
+                showToast("Failed to delete: " + (err.message || err), 'fa-exclamation-triangle');
             }
         });
     };
@@ -622,6 +622,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.go('search', true);
                 return;
             }
+            if (state.currentView === 'library') {
+                this.go('home', true);
+                return;
+            }
             this.go(ppRoutes().isExplorePage() ? 'search' : 'home', true);
         },
         go(view, fromHistory = false) {
@@ -649,6 +653,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 const chip = document.querySelector('.chip.active');
                 renderExplore(chip?.getAttribute('data-genre') || 'Trending');
                 window.PalmPlayUX?.activateBottomNav?.('explore');
+                return;
+            }
+            if (view === 'library') {
+                state.currentView = 'library';
+                setHeaderSearchVisible(true);
+                if (viewHeader) viewHeader.style.display = 'block';
+                if (exploreHero) exploreHero.style.display = 'none';
+                if (categoryChips) categoryChips.style.display = 'none';
+                greetingEl && (greetingEl.style.display = 'none');
+                
+                cardGrid.innerHTML = `
+                    <div class="browse-section-title" style="margin-bottom:20px; font-size:24px;">Your Library</div>
+                    <div class="mobile-library-list" style="display:flex; flex-direction:column; gap:12px;"></div>
+                `;
+                const list = cardGrid.querySelector('.mobile-library-list');
+                
+                // Render Liked Songs
+                const likedItem = document.createElement('a');
+                likedItem.href = '#';
+                likedItem.className = 'playlist-item liked-songs-item';
+                likedItem.style.background = 'rgba(255,255,255,0.05)';
+                likedItem.innerHTML = `<i class="fas fa-heart" style="margin-right:12px; font-size:20px; color:var(--primary);"></i> <div style="flex:1">Liked Songs</div> <span class="liked-count" style="opacity:0.7">${likedSongs.length}</span>`;
+                likedItem.onclick = (e) => { e.preventDefault(); showLikedSongs(); };
+                list.appendChild(likedItem);
+
+                // Render User Playlists
+                playlists.forEach((pl, index) => {
+                    if (!isUserPlaylist(pl)) return;
+                    const item = document.createElement('a');
+                    item.href = '#';
+                    item.className = 'playlist-item';
+                    item.style.background = 'rgba(255,255,255,0.03)';
+                    item.innerHTML = `<i class="fas fa-music" style="margin-right:12px; font-size:18px; opacity:0.7"></i> <div style="flex:1">${escapeHtml(pl.name)}</div> <span class="liked-count" style="opacity:0.7">${pl.tracks.length}</span>`;
+                    item.onclick = (e) => { e.preventDefault(); showPlaylist(index); };
+                    list.appendChild(item);
+                });
+                
+                window.PalmPlayUX?.activateBottomNav?.('library');
                 return;
             }
             state.currentView = 'home';
