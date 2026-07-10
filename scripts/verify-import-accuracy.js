@@ -6,7 +6,7 @@ const appJsContent = fs.readFileSync(appJsPath, 'utf8');
 
 // Simple regex extraction of functions from app.js to ensure we test the actual file code
 function extractFunction(funcName, fileContent) {
-    const regex = new RegExp(`function\\s+${funcName}\\s*\\([^)]*\\)\\s*\\{`, 'g');
+    const regex = new RegExp(`(?:async\\s+)?function\\s+${funcName}\\s*\\([^)]*\\)\\s*\\{`, 'g');
     const match = regex.exec(fileContent);
     if (!match) {
         throw new Error(`Could not find function ${funcName} in app.js`);
@@ -33,10 +33,26 @@ const normalizeSearchTextCode = extractFunction('normalizeSearchText', appJsCont
 const tokenSetCode = extractFunction('tokenSet', appJsContent);
 const scoreTokenOverlapCode = extractFunction('scoreTokenOverlap', appJsContent);
 const computeCuratedMatchScoreCode = extractFunction('computeCuratedMatchScore', appJsContent);
+const fetchCatalogTracksCode = extractFunction('fetchCatalogTracks', appJsContent);
 
 // Run in isolated VM context to avoid scope collisions
 const vm = require('vm');
-const testContext = {};
+const testContext = {
+    catalogRequestInflight: new Map(),
+    fetchCatalogTracksInternal: async (query, limit) => {
+        testContext.internalFetchCount++;
+        return [{ id: 'mock-1', name: 'Mock Catalog Song', artist: 'Test Artist' }];
+    },
+    db: {
+        store: {},
+        searchCache: {
+            get: async (key) => testContext.db.store[key],
+            put: async (item) => { testContext.db.store[item.query] = item; }
+        }
+    },
+    console: console,
+    internalFetchCount: 0
+};
 vm.createContext(testContext);
 vm.runInContext(`
     ${cleanMetadataStringCode}
@@ -44,9 +60,10 @@ vm.runInContext(`
     ${tokenSetCode}
     ${scoreTokenOverlapCode}
     ${computeCuratedMatchScoreCode}
+    ${fetchCatalogTracksCode}
 `, testContext);
 
-const { cleanMetadataString, normalizeSearchText, computeCuratedMatchScore } = testContext;
+const { cleanMetadataString, normalizeSearchText, computeCuratedMatchScore, fetchCatalogTracks } = testContext;
 
 // Test Suite
 let passes = 0;
@@ -77,23 +94,21 @@ assert(clean4 === 'Tum Hi Ho', `Expected 'Tum Hi Ho', got '${clean4}'`);
 
 
 console.log('\n--- Running Match Scorer Spaceless Tests ---');
-// Spaceless match: identical title after removing spaces
 const track1 = { name: 'Churake Dil Mera', artist: 'Kumar Sanu' };
 const item1 = { name: 'Chura Ke Dil Mera', artist: 'Kumar Sanu' };
 const score1 = computeCuratedMatchScore(track1, item1);
 assert(score1 === 1.0, `Spaceless exact title and artist should match 1.0. Got: ${score1}`);
 
-// Spaceless substring match
 const track2 = { name: 'Tumhiho', artist: 'Arijit Singh' };
 const item2 = { name: 'Tum Hi Ho (From "Aashiqui 2")', artist: 'Arijit Singh' };
 const score2 = computeCuratedMatchScore(track2, { name: cleanMetadataString(item2.name), artist: item2.artist });
 assert(score2 >= 0.88, `Spaceless substring title and artist match should be high (>= 0.88). Got: ${score2}`);
 
-// Artist match weighting (title match but different artist)
 const track3 = { name: 'Chura Ke Dil Mera', artist: 'Alka Yagnik' };
 const item3 = { name: 'Chura Ke Dil Mera', artist: 'Kumar Sanu' };
 const score3 = computeCuratedMatchScore(track3, item3);
 assert(score3 < 0.80, `Same title but different artist should score lower. Got: ${score3}`);
+
 
 console.log('\n--- Running Search Engine Fallback Tests ---');
 const mockFetchLog = [];
@@ -128,6 +143,19 @@ const simulateSearchEngine = async (query) => {
     assert(res.length > 0 && res[0] === 'Chura Ke Dil Mera Song Object', 'Should fall back to cleaned query and find the song');
     assert(mockFetchLog.includes('Chura Ke Dil Mera'), 'Should have queried for the cleaned title');
     
+    console.log('\n--- Running Database Query Cache Tests ---');
+    testContext.internalFetchCount = 0;
+
+    // First call: Should go to API (trigger fetchCatalogTracksInternal) and save to cache
+    const results1 = await fetchCatalogTracks('Chura Ke Dil Mera', 30);
+    assert(results1.length > 0 && results1[0].name === 'Mock Catalog Song', 'First call returns results');
+    assert(testContext.internalFetchCount === 1, `First call should trigger 1 internal fetch. Got: ${testContext.internalFetchCount}`);
+
+    // Second call: Should read from Cache (internalFetchCount remains 1)
+    const results2 = await fetchCatalogTracks('Chura Ke Dil Mera', 30);
+    assert(results2.length > 0 && results2[0].name === 'Mock Catalog Song', 'Second call returns cached results');
+    assert(testContext.internalFetchCount === 1, `Second call should NOT trigger internal fetch. Got: ${testContext.internalFetchCount}`);
+
     console.log(`\nVerification complete. Passes: ${passes}, Fails: ${fails}`);
     if (fails > 0) {
         process.exit(1);

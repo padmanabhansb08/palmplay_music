@@ -54,6 +54,12 @@ db.version(4).stores({
     tracks: "++id, userId, playlistId, source, externalId, name, artist",
     likedSongs: "++id, userId, trackName, artist"
 });
+db.version(5).stores({
+    playlists: "++id, userId, name",
+    tracks: "++id, userId, playlistId, source, externalId, name, artist",
+    likedSongs: "++id, userId, trackName, artist",
+    searchCache: "query, results, timestamp"
+});
 
 window.PalmPlayDB = db;
 
@@ -336,6 +342,8 @@ function toggleGestureMode() {
 
 
 document.addEventListener('DOMContentLoaded', () => {
+    const prefetchStreamCache = new Map();
+
     // UI Elements
     const mainView = document.querySelector('.main-view');
     const header = document.querySelector('.top-header');
@@ -3237,6 +3245,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function createTrackCard(track, plIndex, tIdx, options = {}) {
         const card = document.createElement('div');
         card.className = 'card catalog-card';
+        card.dataset.plIdx = plIndex;
+        card.dataset.tIdx = tIdx;
         const art = track.art || DEFAULT_ART_URL;
         card.innerHTML = `
             <div class="card-image" style="background-image: url('${escapeHtml(art)}')">
@@ -3833,7 +3843,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            let url = track.url;
+            let url = track.url || prefetchStreamCache.get(track.id);
             const needsResolve = !url || track._unplayable;
             state.isBuffering = needsResolve;
             state.isPlaying = false;
@@ -4282,16 +4292,48 @@ document.addEventListener('DOMContentLoaded', () => {
     async function fetchCatalogTracks(query, limit = 30) {
         const q = String(query || '').trim();
         if (!q) return [];
-        const inflightKey = `${q.toLowerCase()}::${limit}`;
-        if (catalogRequestInflight.has(inflightKey)) {
-            return catalogRequestInflight.get(inflightKey);
+
+        const cacheKey = `${q.toLowerCase()}::${limit}`;
+
+        if (catalogRequestInflight.has(cacheKey)) {
+            return catalogRequestInflight.get(cacheKey);
         }
-        const request = fetchCatalogTracksInternal(q, limit);
-        catalogRequestInflight.set(inflightKey, request);
+
+        const request = (async () => {
+            try {
+                if (db && db.searchCache) {
+                    const cached = await db.searchCache.get(cacheKey);
+                    if (cached && Date.now() - cached.timestamp < 24 * 60 * 60 * 1000) {
+                        return cached.results;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to read searchCache from DB:', e);
+            }
+
+            const results = await fetchCatalogTracksInternal(q, limit);
+
+            if (results && results.length > 0) {
+                try {
+                    if (db && db.searchCache) {
+                        await db.searchCache.put({
+                            query: cacheKey,
+                            results: results,
+                            timestamp: Date.now()
+                        });
+                    }
+                } catch (e) {
+                    console.warn('Failed to write to searchCache in DB:', e);
+                }
+            }
+            return results;
+        })();
+
+        catalogRequestInflight.set(cacheKey, request);
         try {
             return await request;
         } finally {
-            catalogRequestInflight.delete(inflightKey);
+            catalogRequestInflight.delete(cacheKey);
         }
     }
 
@@ -4301,15 +4343,29 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const fetchRaw = async (q) => {
-            try {
-                const url = `${MUSIC_CATALOG_API_BASE}/search/songs?query=${encodeURIComponent(q)}&limit=${limit}`;
-                const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-                if (!res.ok) return [];
-                const data = await res.json();
-                return Array.isArray(data?.data?.results) ? data.data.results : [];
-            } catch (e) {
-                console.warn('Raw catalog search failed for:', q, e);
-                return [];
+            let retries = 3;
+            let delay = 500;
+            while (retries >= 0) {
+                try {
+                    const url = `${MUSIC_CATALOG_API_BASE}/search/songs?query=${encodeURIComponent(q)}&limit=${limit}`;
+                    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+                    if (res.status === 429 || res.status >= 500) {
+                        throw new Error(`HTTP error ${res.status}`);
+                    }
+                    if (!res.ok) return [];
+                    const data = await res.json();
+                    return Array.isArray(data?.data?.results) ? data.data.results : [];
+                } catch (e) {
+                    if (retries > 0) {
+                        console.warn(`Fetch failed for "${q}". Retrying in ${delay}ms... Error: ${e.message}`);
+                        await new Promise(r => setTimeout(r, delay));
+                        retries--;
+                        delay *= 1.8;
+                        continue;
+                    }
+                    console.error('Raw catalog search failed after retries for:', q, e);
+                    return [];
+                }
             }
         };
 
@@ -4870,45 +4926,25 @@ document.addEventListener('DOMContentLoaded', () => {
     async function filterCards(query) {
         const lowQuery = query.toLowerCase();
 
-        // This logic depends on whether we are in search view or home view
         if (state.currentView === 'search') {
-            // Toggle discovery hub vs search results
             const hub = cardGrid.querySelector('.search-discovery-hub');
             const localSection = document.getElementById('local-search-results');
 
-            if (query.trim().length > 0) {
-                // Searching: hide hub, show local + catalog
-                if (hub) hub.style.display = 'none';
-                if (localSection) localSection.style.display = 'block';
-            } else {
-                // Empty: show hub, hide results
+            if (localSection) localSection.style.display = 'none';
+
+            if (query.trim().length === 0) {
                 if (hub) hub.style.display = 'block';
-                if (localSection) localSection.style.display = 'none';
+                const catalogContainer = document.getElementById('catalog-results');
+                if (catalogContainer) catalogContainer.style.display = 'none';
+                return;
             }
 
-            const localCards = cardGrid.querySelectorAll('.local-card');
-            const allTracks = [];
-            playlists.forEach((pl, plIdx) => {
-                if (!pl.isTemporary) {
-                    pl.tracks.forEach((t, tIdx) => {
-                        allTracks.push({ ...t, plIdx, tIdx });
-                    });
-                }
-            });
+            if (hub) hub.style.display = 'none';
 
-            localCards.forEach((card, index) => {
-                const track = allTracks[index];
-                if (!track) return;
-                const isMatch = track.name.toLowerCase().includes(lowQuery) ||
-                    track.artist.toLowerCase().includes(lowQuery);
-                card.style.display = isMatch ? 'block' : 'none';
-            });
-
-            // Debounced catalog search
             clearTimeout(catalogSearchTimeout);
             const catalogContainer = document.getElementById('catalog-results');
             const catalogGrid = document.getElementById('catalog-card-grid');
-            
+
             if (query.trim().length < 2) {
                 catalogContainer.style.display = 'none';
                 return;
@@ -4919,16 +4955,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
             catalogSearchTimeout = setTimeout(async () => {
                 try {
-                    const tracks = await fetchCatalogTracks(query, 30);
-                    
-                    if (tracks.length === 0) {
+                    const matchedLocal = [];
+                    playlists.forEach((pl, plIdx) => {
+                        if (!pl.isTemporary) {
+                            pl.tracks.forEach((track, tIdx) => {
+                                if (track.name.toLowerCase().includes(lowQuery) || track.artist.toLowerCase().includes(lowQuery)) {
+                                    matchedLocal.push({
+                                        ...track,
+                                        plIdx,
+                                        tIdx,
+                                        isLocal: true
+                                    });
+                                }
+                            });
+                        }
+                    });
+
+                    const catalogTracks = await fetchCatalogTracks(query, 30);
+
+                    if (matchedLocal.length === 0 && catalogTracks.length === 0) {
                         catalogGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found for "' + escapeHtml(query) + '". Try different keywords.</p>';
                         return;
                     }
 
                     addRecentSearch(query);
 
-                    // Map to internal format and render
                     let catalogPlIndex = playlists.findIndex(pl => pl.id === 'catalog_search');
                     if (catalogPlIndex === -1) {
                         catalogPlIndex = playlists.length;
@@ -4939,30 +4990,49 @@ document.addEventListener('DOMContentLoaded', () => {
                             isTemporary: true
                         });
                     }
-                    
-                    playlists[catalogPlIndex].tracks = tracks;
+
+                    const combined = [...matchedLocal, ...catalogTracks];
+                    playlists[catalogPlIndex].tracks = combined;
 
                     catalogGrid.innerHTML = '';
-                    tracks.forEach((track, tIdx) => {
-                        const card = createTrackCard(track, catalogPlIndex, tIdx);
-                        const desc = card.querySelector('.card-desc');
-                        if (desc) {
-                            const playsLabel = track.plays > 0
-                                ? `${(track.plays / 1000).toFixed(0)}K plays`
-                                : track.album;
-                            desc.innerHTML = `${buildTrackMetaLine(track)}<span class="meta-sep"> · </span><span class="meta-plays">${escapeHtml(playsLabel)}</span>`;
+                    combined.forEach((track, idx) => {
+                        let card;
+                        if (track.isLocal) {
+                            card = document.createElement('div');
+                            card.className = 'card catalog-card local-match-card';
+                            const art = track.art || DEFAULT_ART_URL;
+                            card.innerHTML = `
+                                <div class="card-image" style="background-image: url('${escapeHtml(art)}')">
+                                    <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+                                </div>
+                                <div class="card-title">${escapeHtml(track.name)}</div>
+                                <div class="card-desc">
+                                    <span class="meta-link meta-link--name">${escapeHtml(track.artist)}</span>
+                                    <span class="meta-sep"> · </span>
+                                    <span class="local-badge" style="background: rgba(34, 197, 94, 0.15); color: #22c55e; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;">Local</span>
+                                </div>
+                            `;
+                            card.onclick = (e) => {
+                                if (e.target.closest('.meta-link, .card-more-btn, .card-feedback-btn')) return;
+                                playTrack(catalogPlIndex, idx);
+                            };
+                            attachCardActions(card, track, catalogPlIndex, idx);
+                        } else {
+                            card = createTrackCard(track, catalogPlIndex, idx);
+                            const desc = card.querySelector('.card-desc');
+                            if (desc) {
+                                const playsLabel = track.plays > 0
+                                    ? `${(track.plays / 1000).toFixed(0)}K plays`
+                                    : track.album;
+                                desc.innerHTML = `${buildTrackMetaLine(track)}<span class="meta-sep"> · </span><span class="meta-plays">${escapeHtml(playsLabel)}</span>`;
+                            }
                         }
-                        audiusGrid.appendChild(card);
+                        catalogGrid.appendChild(card);
                     });
-                    
+
                 } catch (e) {
                     console.error('Catalog search failed:', e);
-                    showErrorState(audiusGrid, {
-                        icon: 'fa-exclamation-triangle',
-                        title: 'Search failed',
-                        message: navigator.onLine ? 'Could not reach the music service. Try again in a moment.' : 'You appear to be offline.',
-                        onRetry: () => filterCards(query)
-                    });
+                    catalogGrid.innerHTML = '<p style="color:#ff4444; padding:20px;"><i class="fas fa-exclamation-triangle"></i> Could not load results. Check your connection.</p>';
                 }
             }, 800);
         }
@@ -5471,5 +5541,29 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }, 2000);
     }
+
+    // Delegated mouseover prefetch listener for smart media buffering
+    document.addEventListener('mouseover', async (e) => {
+        const card = e.target.closest('.card.catalog-card');
+        if (!card || card.dataset.prefetched === 'true') return;
+        card.dataset.prefetched = 'true';
+
+        const plIdx = parseInt(card.dataset.plIdx);
+        const tIdx = parseInt(card.dataset.tIdx);
+        if (isNaN(plIdx) || isNaN(tIdx)) return;
+
+        const playlist = playlists[plIdx];
+        const track = playlist?.tracks?.[tIdx];
+        if (!track || !track.isCatalog || track.url) return;
+
+        try {
+            const url = await resolveTrackStream(track);
+            if (url) {
+                prefetchStreamCache.set(track.id, url);
+            }
+        } catch (err) {
+            console.warn('[Smart Hover] Pre-resolve failed for track:', track.name, err);
+        }
+    });
 });
 
