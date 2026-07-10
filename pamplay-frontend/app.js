@@ -3061,24 +3061,38 @@ document.addEventListener('DOMContentLoaded', () => {
         const plIndex = await createUserPlaylist(plName);
         if (plIndex < 0) return;
 
+        const containerEl = document.getElementById('import-progress-container');
+        const textEl = document.getElementById('import-progress-text');
+        const percentEl = document.getElementById('import-progress-percent');
+        const barEl = document.getElementById('import-progress-bar');
+        
+        if (containerEl) {
+            containerEl.style.display = 'block';
+            if (barEl) barEl.style.width = '0%';
+            if (textEl) textEl.textContent = `Matching tracks... 0/${entries.length}`;
+            if (percentEl) percentEl.textContent = '0%';
+        }
+        
         showToast(`Matching ${entries.length} tracks...`, 'fa-spinner fa-spin');
-
-        // --- Progress bar setup ---
-        const progTrack = document.getElementById('import-progress-track');
-        const progBar = document.getElementById('import-progress-bar');
-        const setProgress = (pct) => {
-            if (!progBar) return;
-            progBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-        };
-        if (progTrack) progTrack.classList.add('active');
-        // Immediately jump to 8% so user knows something started
-        setProgress(8);
 
         const concurrencyLimit = 6;
         const resolvedTracks = new Array(entries.length).fill(null);
         const missedEntries = [];
         let cursor = 0;
         let resolved = 0;
+
+        const updateProgress = () => {
+            const totalDone = resolved + missedEntries.length;
+            const percentage = Math.floor((totalDone / entries.length) * 100);
+            
+            if (textEl) textEl.textContent = `Matching tracks... ${totalDone}/${entries.length}`;
+            if (percentEl) percentEl.textContent = `${percentage}%`;
+            if (barEl) barEl.style.width = `${percentage}%`;
+            
+            if (totalDone % 5 === 0) {
+                showToast(`Matching... ${totalDone}/${entries.length}`, 'fa-spinner fa-spin');
+            }
+        };
 
         const workers = Array.from({ length: Math.min(concurrencyLimit, entries.length) }, async () => {
             while (cursor < entries.length) {
@@ -3092,36 +3106,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     } else {
                         missedEntries.push(entry.name || entry.query || '?');
                     }
-                    // Progress: 8% → 88% as tracks resolve, leaving last 12% for DB write
-                    const done = resolved + missedEntries.length;
-                    setProgress(8 + (done / entries.length) * 80);
-                    // Update toast every 5 resolved tracks
-                    if (done % 5 === 0) {
-                        showToast(`Matching... ${done}/${entries.length}`, 'fa-spinner fa-spin');
-                    }
+                    updateProgress();
                 } catch (e) {
                     console.warn('Failed to resolve entry:', entry, e);
                     missedEntries.push(entry.name || '?');
+                    updateProgress();
                 }
             }
         });
         await Promise.all(workers);
 
-        // 88% → 95% during DB write phase
-        setProgress(95);
-
         const finalTracks = resolvedTracks.filter(Boolean);
         const missCount = missedEntries.length;
 
         const added = await addTracksToUserPlaylistBatch(plIndex, finalTracks);
-
-        // Snap to 100% then fade out
-        setProgress(100);
-        setTimeout(() => {
-            if (progTrack) progTrack.classList.remove('active');
-            setTimeout(() => { setProgress(0); }, 350);
-        }, 700);
-
+        
+        if (textEl) textEl.textContent = 'Import complete!';
+        if (barEl) barEl.style.width = '100%';
+        if (percentEl) percentEl.textContent = '100%';
+        
         if (added > 0) {
             if (missCount === 0) {
                 showToast(`✓ All ${added} tracks imported successfully!`, 'fa-check-circle');
@@ -3159,6 +3162,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="import-manual-wrap" id="import-manual-wrap">
                     <p class="import-divider"><span>recommended</span></p>
                     <textarea id="import-tracks-text" class="import-tracks-text" placeholder="Paste JioSaavn link (e.g., https://www.jiosaavn.com/featured/...) OR paste exported CSV/text list here."></textarea>
+                    
+                    <div id="import-progress-container" style="display: none; margin-top: 15px; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px;">
+                            <span id="import-progress-text">Starting import...</span>
+                            <span id="import-progress-percent">0%</span>
+                        </div>
+                        <div style="width: 100%; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden;">
+                            <div id="import-progress-bar" style="width: 0%; height: 100%; background: #ff4d4d; transition: width 0.3s ease;"></div>
+                        </div>
+                    </div>
+
                     <button type="button" class="import-tmm-btn" id="open-tmm-btn"><i class="fas fa-external-link-alt"></i> Open TuneMyMusic Fallback</button>
                     <label class="import-file-label">
                         <input type="file" id="import-tracks-file" accept=".txt,.csv,text/plain,text/csv">
