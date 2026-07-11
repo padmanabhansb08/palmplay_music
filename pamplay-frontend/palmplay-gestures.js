@@ -62,7 +62,10 @@ class PalmPlayGestures {
             }
         } catch (err) {
             console.error("Camera access denied or failed:", err);
+            alert("Could not access camera: " + err.message + "\nPlease check your browser permissions or ensure no other app is using the camera.");
             if (this.video) this.video.style.display = 'none';
+            // Force toggle off if it failed
+            if (typeof toggleGestureMode === 'function') toggleGestureMode();
         }
     }
 
