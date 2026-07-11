@@ -197,6 +197,28 @@
     <script src="lib/palmplay-sync.js"></script>
     <script src="app.js?v=26"></script>
     <script src="palmplay-ux.js?v=5"></script>
+    <script src="palmplay-gestures.js"></script>
+    <script>
+        let isGestureMode = false;
+        function toggleGestureMode() {
+            const btn = document.getElementById('gesture-toggle');
+            isGestureMode = !isGestureMode;
+            
+            if (isGestureMode) {
+                btn.innerHTML = '<i class="fas fa-hand-sparkles" style="color:var(--accent)"></i><span style="color:var(--accent)">Gestures: ON</span>';
+                if (!window.palmGestures) {
+                    window.initGestures();
+                } else {
+                    window.palmGestures.resume();
+                }
+            } else {
+                btn.innerHTML = '<i class="fas fa-hand-paper"></i><span>Gestures: OFF</span>';
+                if (window.palmGestures) {
+                    window.palmGestures.pause();
+                }
+            }
+        }
+    </script>
 </body>
 
 </html>
