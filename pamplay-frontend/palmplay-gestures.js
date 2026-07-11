@@ -68,7 +68,14 @@ class PalmPlayGestures {
     }
 
     connectWebSocket() {
-        this.ws = new WebSocket('ws://localhost:8000/ws/gesture');
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        // If running locally, connect to local backend. Otherwise, use production backend URL.
+        const wsHost = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+            ? 'localhost:8000'
+            : 'YOUR_BACKEND_URL.onrender.com'; // TODO: Replace this once you deploy your backend
+            
+        const wsUrl = `${wsProtocol}//${wsHost}/ws/gesture`;
+        this.ws = new WebSocket(wsUrl);
         
         this.ws.onopen = () => {
             console.log('Gesture WebSocket connected!');
