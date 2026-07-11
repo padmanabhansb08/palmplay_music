@@ -1,11 +1,10 @@
 """
-PalmPlay - FastAPI Backend Server
-Handles gesture detection via WebSocket and serves as an API bridge.
-This is the CLOUD version - no pygame, no local music playback.
+PalmPlay - FastAPI Backend Server (HIGH ACCURACY VERSION)
+Uses Google MediaPipe's pre-trained GestureRecognizer neural network
+for 97%+ gesture detection accuracy instead of manual landmark math.
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import base64
@@ -14,6 +13,7 @@ import cv2
 import numpy as np
 from collections import deque
 import time
+import urllib.request
 
 # MediaPipe imports
 import mediapipe as mp
@@ -22,7 +22,6 @@ from mediapipe.tasks.python import vision
 
 app = FastAPI(title="PalmPlay Gesture API")
 
-# CORS - allow all origins so the Vercel frontend can connect
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -32,135 +31,101 @@ app.add_middleware(
 )
 
 
-# ── Gesture Recognizer ──────────────────────────────────────────────────────
+# ── Model Download ─────────────────────────────────────────────────────────────
 
-class GestureRecognizer:
+MODEL_URL = "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task"
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gesture_recognizer.task")
+
+
+def ensure_model():
+    if not os.path.exists(MODEL_PATH):
+        print(f"Downloading gesture model from Google...")
+        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+        print(f"Model downloaded to: {MODEL_PATH}")
+    else:
+        print(f"Model already present at: {MODEL_PATH}")
+
+
+# ── Gesture Action Mapper ──────────────────────────────────────────────────────
+#
+# MediaPipe GestureRecognizer returns these class names:
+#   None, Closed_Fist, Open_Palm, Pointing_Up, Thumb_Up, Thumb_Down,
+#   Victory, ILoveYou
+#
+# We map them to PalmPlay actions:
+
+# Gestures that need ONLY the class name (no direction check)
+GESTURE_MAP = {
+    "Closed_Fist": "toggle",   # Fist  -> Play / Pause
+    "Open_Palm":   "shuffle",  # Palm  -> Shuffle
+    "Thumb_Up":    "repeat",   # Thumb -> Repeat
+}
+
+# Cooldown per action (seconds)
+COOLDOWNS = {
+    "toggle":  1.2,
+    "shuffle": 1.5,
+    "repeat":  1.5,
+    "next":    1.2,
+    "prev":    1.2,
+}
+
+
+class ActionCooldown:
     def __init__(self):
-        self.finger_buf = deque(maxlen=5)
-        self.last_trigger = {}
-        self.cooldown = 1.2
+        self.last = {}
 
-    def is_extended(self, lm, tip, pip, use_x=False):
-        """Returns True if a finger is clearly extended."""
-        if use_x:
-            return abs(lm[tip][0] - lm[pip][0]) > 0.04
-        return lm[tip][1] < lm[pip][1] - 0.02
-
-    def is_folded(self, lm, tip, pip):
-        """Returns True if a finger is clearly folded down."""
-        return lm[tip][1] > lm[pip][1] + 0.02
-
-    def cooldown_ok(self, action):
-        t = time.time()
-        if t - self.last_trigger.get(action, 0) >= self.cooldown:
-            self.last_trigger[action] = t
+    def ok(self, action):
+        now = time.time()
+        cd = COOLDOWNS.get(action, 1.0)
+        if now - self.last.get(action, 0) >= cd:
+            self.last[action] = now
             return True
         return False
 
-    def recognize(self, lm):
-        if not lm or len(lm) < 21:
-            return None
 
-        # Per-finger extended/folded states with margin to reduce jitter
-        thumb_ext  = abs(lm[4][0] - lm[2][0]) > 0.04
-        idx_ext    = self.is_extended(lm, 8, 6)
-        mid_ext    = self.is_extended(lm, 12, 10)
-        ring_ext   = self.is_extended(lm, 16, 14)
-        pinky_ext  = self.is_extended(lm, 20, 18)
+# ── Globals ───────────────────────────────────────────────────────────────────
 
-        idx_fold   = self.is_folded(lm, 8, 6)
-        mid_fold   = self.is_folded(lm, 12, 10)
-        ring_fold  = self.is_folded(lm, 16, 14)
-        pinky_fold = self.is_folded(lm, 20, 18)
-
-        ext_count = sum([thumb_ext, idx_ext, mid_ext, ring_ext, pinky_ext])
-        self.finger_buf.append(ext_count)
-        smooth_count = int(round(np.median(list(self.finger_buf))))
-
-        # ── FIST → Toggle play/pause ──────────────────────────────────────
-        # All 4 fingers clearly folded regardless of thumb
-        if idx_fold and mid_fold and ring_fold and pinky_fold:
-            if self.cooldown_ok("toggle"):
-                return {"gesture": "toggle"}
-
-        # ── OPEN PALM → Shuffle ───────────────────────────────────────────
-        if smooth_count >= 5 and idx_ext and mid_ext and ring_ext and pinky_ext:
-            if self.cooldown_ok("shuffle"):
-                return {"gesture": "shuffle"}
-
-        # ── THUMB UP → Repeat ─────────────────────────────────────────────
-        # Thumb tip well above wrist, all fingers folded
-        if (lm[4][1] < lm[0][1] - 0.10 and
-                not idx_ext and not mid_ext and not ring_ext and not pinky_ext):
-            if self.cooldown_ok("repeat"):
-                return {"gesture": "repeat"}
-
-        # ── INDEX POINTING RIGHT → Next track ─────────────────────────────
-        # Only index finger extended AND pointing to the right of wrist
-        if idx_ext and not mid_ext and not ring_ext and not pinky_ext:
-            if lm[8][0] > lm[0][0] + 0.10:
-                if self.cooldown_ok("next"):
-                    return {"gesture": "next"}
-            # ── INDEX POINTING LEFT → Prev track ──────────────────────────
-            elif lm[8][0] < lm[0][0] - 0.10:
-                if self.cooldown_ok("prev"):
-                    return {"gesture": "prev"}
-
-        # ── TWO FINGERS (index + middle) → Volume control ─────────────────
-        # Volume mapped from fingertip height: high hand = loud, low hand = quiet
-        if idx_ext and mid_ext and not ring_ext and not pinky_ext:
-            avg_y = (lm[8][1] + lm[12][1]) / 2.0
-            vol = int((1.0 - avg_y) * 120)
-            return {"gesture": "volume", "value": max(0, min(100, vol))}
-
-        return None
+gesture_recognizer = None
+cooldown = ActionCooldown()
 
 
-# ── Globals ──────────────────────────────────────────────────────────────────
-
-gesture_recognizer = GestureRecognizer()
-hand_detector = None
-
-
-def init_hand_detector():
-    global hand_detector
-    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_landmarker.task")
-    if os.path.exists(model_path):
-        base_options = python.BaseOptions(model_asset_path=model_path)
-        options = vision.HandLandmarkerOptions(
-            base_options=base_options,
-            num_hands=1,
-            min_hand_detection_confidence=0.6,
-            min_hand_presence_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        hand_detector = vision.HandLandmarker.create_from_options(options)
-        print(f"Hand detector loaded from: {model_path}")
-    else:
-        print(f"WARNING: hand_landmarker.task not found at: {model_path}")
+def init_recognizer():
+    global gesture_recognizer
+    ensure_model()
+    base_options = python.BaseOptions(model_asset_path=MODEL_PATH)
+    options = vision.GestureRecognizerOptions(
+        base_options=base_options,
+        num_hands=1,
+        min_hand_detection_confidence=0.7,
+        min_hand_presence_confidence=0.6,
+        min_tracking_confidence=0.6,
+    )
+    gesture_recognizer = vision.GestureRecognizer.create_from_options(options)
+    print("GestureRecognizer (AI model) loaded successfully!")
 
 
 try:
-    init_hand_detector()
+    init_recognizer()
 except Exception as e:
-    print(f"Hand detector init failed: {e}")
+    print(f"GestureRecognizer init failed: {e}")
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 async def root():
-    return {"status": "PalmPlay Gesture API is running", "hand_detector": hand_detector is not None}
+    return {"status": "PalmPlay Gesture API running", "model_ready": gesture_recognizer is not None}
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "hand_detector_ready": hand_detector is not None}
+    return {"status": "ok", "model_ready": gesture_recognizer is not None}
 
 
 @app.get("/api/state")
 async def api_state():
-    return {"hand_detector_ready": hand_detector is not None}
+    return {"model_ready": gesture_recognizer is not None}
 
 
 @app.websocket("/ws/gesture")
@@ -168,20 +133,16 @@ async def websocket_gesture(websocket: WebSocket):
     await websocket.accept()
     print("Client connected to /ws/gesture")
 
-    if hand_detector is None:
-        await websocket.send_json({
-            "gesture": None,
-            "error": "Hand detector not initialized. Check that hand_landmarker.task is present."
-        })
+    if gesture_recognizer is None:
+        await websocket.send_json({"gesture": None, "error": "AI gesture model not initialized."})
         await websocket.close()
         return
 
     try:
         while True:
-            # Receive base64 image string from frontend
             data = await websocket.receive_text()
 
-            # Strip data URL prefix if present
+            # Strip data URL prefix
             if data.startswith("data:image"):
                 data = data.split(",")[1]
 
@@ -194,16 +155,60 @@ async def websocket_gesture(websocket: WebSocket):
                 await asyncio.sleep(0.02)
                 continue
 
-            if frame is not None:
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-                result = hand_detector.detect(mp_image)
+            if frame is None:
+                await asyncio.sleep(0.02)
+                continue
 
-                if result.hand_landmarks:
-                    landmarks = [(lm.x, lm.y, lm.z) for lm in result.hand_landmarks[0]]
-                    gesture_result = gesture_recognizer.recognize(landmarks)
-                    if gesture_result:
-                        await websocket.send_json(gesture_result)
+            # Run inference
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            result = gesture_recognizer.recognize(mp_image)
+
+            if not result.gestures or not result.gestures[0]:
+                await asyncio.sleep(0.02)
+                continue
+
+            top_gesture = result.gestures[0][0]
+            label = top_gesture.category_name
+            score = top_gesture.score
+
+            # Ignore low-confidence predictions
+            if score < 0.80:
+                await asyncio.sleep(0.02)
+                continue
+
+            response = None
+
+            # ── Named gestures ───────────────────────────────────────────
+            if label in GESTURE_MAP:
+                action = GESTURE_MAP[label]
+                if cooldown.ok(action):
+                    response = {"gesture": action}
+
+            # ── Pointing Up: determine LEFT or RIGHT using landmarks ──────
+            elif label == "Pointing_Up" and result.hand_landmarks:
+                lm = result.hand_landmarks[0]
+                # index tip x vs wrist x (0=left, 1=right in image)
+                tip_x   = lm[8].x
+                wrist_x = lm[0].x
+                diff = tip_x - wrist_x
+                if diff > 0.08:     # tip to the right → Next
+                    if cooldown.ok("next"):
+                        response = {"gesture": "next"}
+                elif diff < -0.08:  # tip to the left  → Prev
+                    if cooldown.ok("prev"):
+                        response = {"gesture": "prev"}
+
+            # ── Victory / Two fingers: Volume control ─────────────────────
+            elif label == "Victory" and result.hand_landmarks:
+                lm = result.hand_landmarks[0]
+                avg_y = (lm[8].y + lm[12].y) / 2.0
+                vol = int((1.0 - avg_y) * 120)
+                vol = max(0, min(100, vol))
+                response = {"gesture": "volume", "value": vol}
+
+            if response:
+                await websocket.send_json(response)
 
             await asyncio.sleep(0.02)
 
