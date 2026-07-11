@@ -54,13 +54,12 @@ class PalmPlayGestures {
             });
             this.video.srcObject = stream;
             
-            // Wait for video to be ready
-            return new Promise(resolve => {
-                this.video.onloadedmetadata = () => {
-                    this.video.play();
-                    resolve();
-                };
-            });
+            // Play the video stream immediately
+            try {
+                await this.video.play();
+            } catch (playErr) {
+                console.error("Auto-play was prevented or failed:", playErr);
+            }
         } catch (err) {
             console.error("Camera access denied or failed:", err);
             if (this.video) this.video.style.display = 'none';
