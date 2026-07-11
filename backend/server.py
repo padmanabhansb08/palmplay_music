@@ -1,11 +1,11 @@
 """
 PalmPlay - FastAPI Backend Server
-Handles music playback, gesture detection, and serves the web frontend.
+Handles gesture detection via WebSocket and serves as an API bridge.
+This is the CLOUD version - no pygame, no local music playback.
 """
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import json
@@ -14,8 +14,6 @@ import asyncio
 import cv2
 import numpy as np
 from io import BytesIO
-from PIL import Image
-import pygame
 from collections import deque
 import time
 
@@ -24,18 +22,9 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-# Mutagen for cover art
-try:
-    from mutagen.mp3 import MP3
-    from mutagen.id3 import ID3, APIC
+app = FastAPI(title="PalmPlay Gesture API")
 
-    HAS_MUTAGEN = True
-except ImportError:
-    HAS_MUTAGEN = False
-
-app = FastAPI(title="PalmPlay API")
-
-# CORS for frontend
+# CORS - allow all origins so the Vercel frontend can connect
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -45,95 +34,8 @@ app.add_middleware(
 )
 
 
-# Global state
-class MusicPlayer:
-    def __init__(self):
-        pygame.mixer.init()
-        self.tracks = []
-        self.current_idx = 0
-        self.is_playing = False
-        self.volume = 50
-        self.shuffle = False
-        self.repeat = False
-        self.music_folder = None
+# ── Gesture Recognizer ──────────────────────────────────────────────────────
 
-    def load_folder(self, folder_path):
-        self.music_folder = folder_path
-        self.tracks = []
-        if os.path.isdir(folder_path):
-            for f in sorted(os.listdir(folder_path)):
-                if f.lower().endswith((".mp3", ".wav", ".ogg")):
-                    self.tracks.append(
-                        {
-                            "name": os.path.splitext(f)[0],
-                            "path": os.path.join(folder_path, f),
-                            "filename": f,
-                        }
-                    )
-        return len(self.tracks)
-
-    def play_track(self, idx):
-        if 0 <= idx < len(self.tracks):
-            self.current_idx = idx
-            pygame.mixer.music.load(self.tracks[idx]["path"])
-            pygame.mixer.music.play()
-            self.is_playing = True
-            return True
-        return False
-
-    def toggle_play(self):
-        if self.is_playing:
-            pygame.mixer.music.pause()
-            self.is_playing = False
-        else:
-            if pygame.mixer.music.get_busy():
-                pygame.mixer.music.unpause()
-            else:
-                if self.tracks:
-                    pygame.mixer.music.play()
-            self.is_playing = True
-        return self.is_playing
-
-    def next_track(self):
-        if self.tracks:
-            if self.shuffle:
-                import random
-
-                self.current_idx = random.randint(0, len(self.tracks) - 1)
-            else:
-                self.current_idx = (self.current_idx + 1) % len(self.tracks)
-            return self.play_track(self.current_idx)
-        return False
-
-    def prev_track(self):
-        if self.tracks:
-            self.current_idx = (self.current_idx - 1) % len(self.tracks)
-            return self.play_track(self.current_idx)
-        return False
-
-    def set_volume(self, vol):
-        self.volume = max(0, min(100, vol))
-        pygame.mixer.music.set_volume(self.volume / 100)
-        return self.volume
-
-    def get_state(self):
-        current_track = None
-        if self.tracks and 0 <= self.current_idx < len(self.tracks):
-            current_track = self.tracks[self.current_idx]
-        return {
-            "tracks": [
-                {"name": t["name"], "filename": t["filename"]} for t in self.tracks
-            ],
-            "current_idx": self.current_idx,
-            "current_track": current_track["name"] if current_track else None,
-            "is_playing": self.is_playing,
-            "volume": self.volume,
-            "shuffle": self.shuffle,
-            "repeat": self.repeat,
-        }
-
-
-# Gesture Recognizer
 class GestureRecognizer:
     def __init__(self):
         self.center_buf = deque(maxlen=6)
@@ -174,12 +76,11 @@ class GestureRecognizer:
         self.finger_buf.append(raw_cnt)
         cnt = int(round(np.median(list(self.finger_buf))))
 
-        # Check finger states
-        thumb_up = lm[4][1] < lm[3][1]
-        idx_up = lm[8][1] < lm[6][1]
-        mid_up = lm[12][1] < lm[10][1]
-        ring_up = lm[16][1] < lm[14][1]
-        pinky_up = lm[20][1] < lm[18][1]
+        thumb_up  = lm[4][1] < lm[3][1]
+        idx_up    = lm[8][1] < lm[6][1]
+        mid_up    = lm[12][1] < lm[10][1]
+        ring_up   = lm[16][1] < lm[14][1]
+        pinky_up  = lm[20][1] < lm[18][1]
 
         # Open palm -> Shuffle
         if cnt >= 5 and idx_up and mid_up and ring_up and pinky_up and thumb_up:
@@ -192,12 +93,12 @@ class GestureRecognizer:
                 if self.cooldown_ok("repeat"):
                     return "repeat"
 
-        # Two fingers -> Volume (return special)
+        # Two fingers -> Volume
         if cnt >= 2 and idx_up and mid_up and not ring_up and not pinky_up:
             vol = int((1.0 - np.mean([lm[8][1], lm[12][1]])) * 100)
             return ("volume", max(0, min(100, vol)))
 
-        # Fist
+        # Fist -> Toggle play/pause
         tips = [4, 8, 12, 16, 20]
         folded = sum(1 for tip in tips if lm[tip][1] > lm[tip - 2][1])
         if folded >= 4:
@@ -207,17 +108,16 @@ class GestureRecognizer:
         return None
 
 
-# Initialize global objects
-player = MusicPlayer()
-gesture_recognizer = GestureRecognizer()
+# ── Globals ──────────────────────────────────────────────────────────────────
 
-# Hand detector setup
+gesture_recognizer = GestureRecognizer()
 hand_detector = None
 
 
 def init_hand_detector():
     global hand_detector
-    model_path = os.path.abspath("hand_landmarker.task")
+    # Look for the model in the same directory as this script
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_landmarker.task")
     if os.path.exists(model_path):
         base_options = python.BaseOptions(model_asset_path=model_path)
         options = vision.HandLandmarkerOptions(
@@ -227,6 +127,9 @@ def init_hand_detector():
             min_tracking_confidence=0.5,
         )
         hand_detector = vision.HandLandmarker.create_from_options(options)
+        print(f"✅ Hand detector loaded from: {model_path}")
+    else:
+        print(f"⚠️  hand_landmarker.task not found at: {model_path}")
 
 
 try:
@@ -235,142 +138,38 @@ except Exception as e:
     print(f"Hand detector init failed: {e}")
 
 
-# API Routes
+# ── Routes ────────────────────────────────────────────────────────────────────
+
 @app.get("/")
 async def root():
-    return FileResponse("static/index.html")
+    return {"status": "PalmPlay Gesture API is running 🚀", "hand_detector": hand_detector is not None}
 
 
-@app.get("/api/state")
-async def get_state():
-    return player.get_state()
-
-
-@app.post("/api/load-folder")
-async def load_folder(data: dict):
-    folder = data.get("folder", "")
-    if os.path.isdir(folder):
-        count = player.load_folder(folder)
-        return {"success": True, "count": count}
-    return {"success": False, "error": "Invalid folder"}
-
-
-@app.post("/api/play/{idx}")
-async def play_track(idx: int):
-    success = player.play_track(idx)
-    return {"success": success, "state": player.get_state()}
-
-
-@app.post("/api/toggle")
-async def toggle_play():
-    is_playing = player.toggle_play()
-    return {"is_playing": is_playing}
-
-
-@app.post("/api/next")
-async def next_track():
-    success = player.next_track()
-    return {"success": success, "state": player.get_state()}
-
-
-@app.post("/api/prev")
-async def prev_track():
-    success = player.prev_track()
-    return {"success": success, "state": player.get_state()}
-
-
-@app.post("/api/volume/{vol}")
-async def set_volume(vol: int):
-    new_vol = player.set_volume(vol)
-    return {"volume": new_vol}
-
-
-@app.post("/api/shuffle")
-async def toggle_shuffle():
-    player.shuffle = not player.shuffle
-    return {"shuffle": player.shuffle}
-
-
-@app.post("/api/repeat")
-async def toggle_repeat():
-    player.repeat = not player.repeat
-    return {"repeat": player.repeat}
-
-
-@app.get("/api/cover/{idx}")
-async def get_cover(idx: int):
-    if not HAS_MUTAGEN or idx >= len(player.tracks):
-        return {"cover": None}
-
-    try:
-        audio = MP3(player.tracks[idx]["path"], ID3=ID3)
-        for tag in audio.tags.values():
-            if isinstance(tag, APIC):
-                cover_b64 = base64.b64encode(tag.data).decode()
-                return {"cover": f"data:image/jpeg;base64,{cover_b64}"}
-    except:
-        pass
-    return {"cover": None}
-
-
-@app.post("/api/detect-gesture")
-async def detect_gesture(file: UploadFile = File(...)):
-    """Process an image frame and detect gestures."""
-    if hand_detector is None:
-        return {"gesture": None, "error": "Hand detector not initialized"}
-
-    try:
-        contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-        if frame is None:
-            return {"gesture": None}
-
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        result = hand_detector.detect(mp_image)
-
-        if result.hand_landmarks:
-            landmarks = [(lm.x, lm.y, lm.z) for lm in result.hand_landmarks[0]]
-            gesture = gesture_recognizer.recognize(landmarks)
-
-            if gesture:
-                # Execute gesture action
-                if gesture == "toggle":
-                    player.toggle_play()
-                    return {"gesture": "toggle", "action": "play/pause"}
-                elif gesture == "shuffle":
-                    player.shuffle = not player.shuffle
-                    return {"gesture": "shuffle", "value": player.shuffle}
-                elif gesture == "repeat":
-                    player.repeat = not player.repeat
-                    return {"gesture": "repeat", "value": player.repeat}
-                elif isinstance(gesture, tuple) and gesture[0] == "volume":
-                    player.set_volume(gesture[1])
-                    return {"gesture": "volume", "value": gesture[1]}
-
-        return {"gesture": None}
-    except Exception as e:
-        return {"gesture": None, "error": str(e)}
+@app.get("/health")
+async def health():
+    return {"status": "ok", "hand_detector_ready": hand_detector is not None}
 
 
 @app.websocket("/ws/gesture")
 async def websocket_gesture(websocket: WebSocket):
     await websocket.accept()
+    print("Client connected to /ws/gesture")
+
     if hand_detector is None:
-        await websocket.send_json({"gesture": None, "error": "Hand detector not initialized"})
+        await websocket.send_json({"gesture": None, "error": "Hand detector not initialized. Check that hand_landmarker.task is present."})
         await websocket.close()
         return
 
     try:
         while True:
-            # Receive base64 string from frontend
+            # Receive base64 image string from frontend
             data = await websocket.receive_text()
+
+            # Strip the data URL prefix if present
             if data.startswith("data:image"):
                 data = data.split(",")[1]
-            
-            # Decode image
+
+            # Decode the image
             img_bytes = base64.b64decode(data)
             nparr = np.frombuffer(img_bytes, np.uint8)
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -383,15 +182,13 @@ async def websocket_gesture(websocket: WebSocket):
                 if result.hand_landmarks:
                     landmarks = [(lm.x, lm.y, lm.z) for lm in result.hand_landmarks[0]]
                     gesture = gesture_recognizer.recognize(landmarks)
-                    
+
                     if gesture:
-                        # If volume, gesture is a tuple ("volume", int)
                         if isinstance(gesture, tuple) and gesture[0] == "volume":
                             await websocket.send_json({"gesture": "volume", "value": gesture[1]})
                         else:
                             await websocket.send_json({"gesture": gesture})
-            
-            # Send a tiny delay to yield to the event loop
+
             await asyncio.sleep(0.01)
 
     except WebSocketDisconnect:
@@ -399,10 +196,8 @@ async def websocket_gesture(websocket: WebSocket):
     except Exception as e:
         print(f"WebSocket error: {e}")
 
-# Serve static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)  # nosec B104
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)  # nosec B104
