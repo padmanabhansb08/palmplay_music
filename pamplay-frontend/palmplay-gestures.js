@@ -72,7 +72,7 @@ class PalmPlayGestures {
         // If running locally, connect to local backend. Otherwise, use production backend URL.
         const wsHost = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
             ? 'localhost:8000'
-            : 'YOUR_BACKEND_URL.onrender.com'; // TODO: Replace this once you deploy your backend
+            : 'palmplay-music.onrender.com'; // Production backend on Render
             
         const wsUrl = `${wsProtocol}//${wsHost}/ws/gesture`;
         this.ws = new WebSocket(wsUrl);
