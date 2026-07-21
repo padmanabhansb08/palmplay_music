@@ -215,7 +215,7 @@
 
     async function pushPlaylistTracks(pl) {
         if (!enabled() || !pl?.cloudId) return;
-        const userId = window.PalmPlayAuth.getUser().id;
+        const userId = window.PalmPlayAuth.getUser()?.id;
         if (!userId) return;
 
         const sb = client();
@@ -234,14 +234,14 @@
 
     async function deleteCloudPlaylist(pl) {
         if (!enabled() || !pl?.cloudId) return;
-        const userId = window.PalmPlayAuth.getUser().id;
+        const userId = window.PalmPlayAuth.getUser()?.id;
         if (!userId) return;
         await client().from('user_playlists').delete().eq('id', pl.cloudId).eq('user_id', userId);
     }
 
     async function pushLike(liked) {
         if (!enabled() || !liked) return;
-        const userId = window.PalmPlayAuth.getUser().id;
+        const userId = window.PalmPlayAuth.getUser()?.id;
         if (!userId) return;
         const { error } = await client().from('user_liked_songs').upsert(
             likeRow(userId, liked),
@@ -252,7 +252,7 @@
 
     async function removeLike(trackName, artist) {
         if (!enabled()) return;
-        const userId = window.PalmPlayAuth.getUser().id;
+        const userId = window.PalmPlayAuth.getUser()?.id;
         if (!userId) return;
         await client()
             .from('user_liked_songs')

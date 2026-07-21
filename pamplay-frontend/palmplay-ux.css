@@ -431,10 +431,39 @@ body.player-expanded .player-bar {
     letter-spacing: 0.02em;
     cursor: pointer;
     transition: color 0.2s ease;
+    position: relative;
+    min-width: 56px;
 }
 
 .bottom-nav-item i {
     font-size: 20px;
+    position: relative;
+    z-index: 1;
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.bottom-nav-item span {
+    position: relative;
+    z-index: 1;
+}
+
+/* Pill indicator behind active icon */
+.bottom-nav-item::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%) scaleX(0);
+    width: 56px;
+    height: 32px;
+    border-radius: 16px;
+    background: rgba(255, 40, 40, 0.15);
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s;
+    z-index: 0;
+}
+
+.bottom-nav-item.active::before {
+    transform: translateX(-50%) scaleX(1);
 }
 
 .bottom-nav-item.active {
@@ -443,6 +472,12 @@ body.player-expanded .player-bar {
 
 .bottom-nav-item.active i {
     color: var(--primary);
+    transform: translateY(-1px) scale(1.1);
+}
+
+/* Tap feedback */
+.bottom-nav-item:active i {
+    transform: scale(0.88);
 }
 
 /* ─── Now Playing (Gap 4 — full screen) ─── */
@@ -1602,17 +1637,70 @@ body.now-playing-open {
         gap: 8px;
     }
 
-    .player-section--center {
-        order: -1;
-        width: 100%;
+    .player-section--left {
+        display: flex;
+        align-items: center;
+        flex: 1;
+        min-width: 0;
     }
 
-    .player-section--left {
-        width: 100%;
+    .player-section--center {
+        flex-shrink: 0;
+        order: unset;
+        width: auto;
+        padding: 0;
     }
 
     .player-section--right {
         display: none;
+    }
+
+    /* Hide progress row on mini player — shown in Now Playing panel */
+    .player-bar .progress-row {
+        display: none !important;
+    }
+
+    /* Thin progress line at very top of player bar */
+    .player-bar::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: var(--mini-progress, 0%);
+        height: 2px;
+        background: var(--primary);
+        border-radius: 0 2px 0 0;
+        transition: width 0.1s linear;
+    }
+
+    /* Up-chevron expand hint */
+    .player-bar::after {
+        content: '';
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 36px;
+        height: 3px;
+        border-radius: 2px;
+        background: rgba(255,255,255,0.18);
+    }
+
+    /* Show only play and next buttons in mini player controls */
+    .player-bar .control-buttons .fa-random,
+    .player-bar .control-buttons .fa-step-backward,
+    .player-bar .control-buttons .fa-redo-alt {
+        display: none !important;
+    }
+
+    .player-bar .control-buttons {
+        gap: 12px;
+    }
+
+    /* Don't show volume controls on mobile */
+    .volume-controls.mobile-hide,
+    .player-bar .volume-controls {
+        display: none !important;
     }
 
     .volume-controls.mobile-hide {
@@ -1645,6 +1733,14 @@ body.now-playing-open {
         grid-column: 2;
         grid-row: 1;
         gap: 6px;
+        /* Hide nav history buttons on mobile — unused in SPA context */
+        display: none !important;
+    }
+
+    /* Extend sidebar-toggle to fill the gap left by hiding header-history */
+    .top-header .sidebar-toggle {
+        grid-column: 1 / 3;
+        grid-row: 1;
     }
 
     .header-fwd--hide-mobile {
@@ -1787,9 +1883,7 @@ body.now-playing-open {
         padding: 0;
         justify-content: center;
     }
-}
 
-@media (max-width: 480px) {
     .hero-title {
         font-size: 24px !important;
     }
@@ -1813,6 +1907,32 @@ body.now-playing-open {
 
     #app {
         padding-bottom: calc(var(--player-height) + env(safe-area-inset-bottom));
+        padding-bottom: calc(80px + var(--bottom-nav-height) + var(--safe-bottom));
+    }
+
+    /* Now Playing: larger play button, better spacing on tiny screens */
+    .now-playing-controls .play-pause-btn {
+        width: 72px !important;
+        height: 72px !important;
+        font-size: 28px !important;
+    }
+
+    .now-playing-art {
+        width: min(280px, 82vw);
+        margin-bottom: 20px;
+    }
+
+    #np-title {
+        font-size: clamp(20px, 5vw, 28px);
+    }
+
+    /* Home hero: prevent text clipping on tiny screens */
+    .home-hero {
+        min-height: 160px !important;
+    }
+
+    .greeting {
+        font-size: clamp(22px, 6vw, 32px) !important;
     }
 }
 
@@ -1833,3 +1953,162 @@ body.now-playing-open {
         bottom: 0;
     }
 }
+
+/* ==========================================================================
+   INTERACTIVE ONBOARDING TOUR STYLES
+   ========================================================================== */
+#tour-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    background: rgba(0, 0, 0, 0.7);
+    pointer-events: auto;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+}
+
+#tour-overlay.visible {
+    opacity: 1;
+}
+
+#tour-spotlight {
+    position: fixed;
+    border-radius: 12px;
+    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.78), 0 0 20px 4px var(--primary);
+    z-index: 9999;
+    pointer-events: none;
+    transition: all 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+#tour-bubble {
+    position: fixed;
+    background: rgba(18, 18, 22, 0.85);
+    backdrop-filter: blur(25px) saturate(180%);
+    -webkit-backdrop-filter: blur(25px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px;
+    padding: 20px 24px;
+    width: 320px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), inset 0 0 10px rgba(255, 255, 255, 0.05);
+    z-index: 10000;
+    color: white;
+    font-family: 'Outfit', sans-serif;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    opacity: 0;
+    transform: scale(0.95);
+    transition: all 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+#tour-bubble.visible {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.tour-bubble-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tour-bubble-title {
+    font-size: 18px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #ffffff 0%, #a8a8a8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tour-bubble-close {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    font-size: 14px;
+    transition: color 0.2s;
+}
+
+.tour-bubble-close:hover {
+    color: #fff;
+}
+
+.tour-bubble-body {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.75);
+    line-height: 1.6;
+}
+
+.tour-bubble-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 6px;
+}
+
+.tour-dots {
+    display: flex;
+    gap: 6px;
+}
+
+.tour-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transition: background 0.2s, transform 0.2s;
+}
+
+.tour-dot.active {
+    background: var(--primary);
+    transform: scale(1.2);
+}
+
+.tour-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.tour-btn {
+    border-radius: 30px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    padding: 6px 14px;
+}
+
+.tour-btn.skip {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.tour-btn.skip:hover {
+    color: #fff;
+}
+
+.tour-btn.back {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.tour-btn.back:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.tour-btn.next {
+    background: var(--primary);
+    color: #fff;
+    box-shadow: 0 4px 12px var(--primary-glow);
+}
+
+.tour-btn.next:hover {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+}
+

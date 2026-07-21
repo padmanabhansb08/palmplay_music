@@ -194,9 +194,229 @@
     <script src="supabase-config.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="lib/palmplay-auth.js"></script>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <script>!function(){if(document.querySelector("base[data-pp-base]"))return;var p=location.pathname,b="/pamplay-frontend/";(p==="/app"||p.startsWith("/app/"))&&(b="/app/");var e=document.createElement("base");e.setAttribute("data-pp-base","1");e.href=b;document.head.insertBefore(e,document.head.firstChild)}();</script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PalmPlay - Personalized Player</title>
+    <link rel="canonical" href="https://palmplay-music.vercel.app/app">
+    <meta property="og:title" content="PalmPlay Music">
+    <meta property="og:url" content="https://palmplay-music.vercel.app/app">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="PalmPlay">
+    <meta name="theme-color" content="#000000">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="assets/gallery/p1.png">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="palmplay-ux.css?v=10">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+    <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
+</head>
+
+<body>
+    <div class="ambient-bg">
+        <div class="gradient-orb" id="orb-1"></div>
+        <div class="gradient-orb" id="orb-2"></div>
+        <div class="gradient-orb" id="orb-3"></div>
+    </div>
+    <div id="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h1>PalmPlay</h1>
+            </div>
+
+            <nav class="nav-menu">
+                <a href="home.html" data-pp-route="home" class="nav-item active"><i class="fas fa-home"></i> Home</a>
+                <a href="explore.html#discover" data-pp-route="discover" class="nav-item"><i class="fas fa-search"></i> Discover</a>
+                <a href="explore.html" data-pp-route="explore" class="nav-item" data-nav-explore><i class="fas fa-compass"></i> Explore</a>
+            </nav>
+
+            <div class="library-header"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 0 12px; margin-top: 24px; color: var(--text-subdued);">
+                <div style="display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 14px;">
+                    <i class="fas fa-layer-group"></i> Your Library
+                </div>
+                <div class="add-music-dropdown" style="position: relative;">
+                    <button id="add-music-btn" class="control-btn"
+                        style="background: transparent; transform: scale(1.2);"><i class="fas fa-plus"></i></button>
+                    <div id="add-options"
+                        style="display: none; position: absolute; left: 0; top: 100%; background: var(--bg-highlight); border-radius: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); z-index: 1000; min-width: 140px; padding: 4px 0;">
+                        <button id="add-files-btn"
+                            style="display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: transparent; color: white; cursor: pointer; font-size: 13px;">Add
+                            Files</button>
+                        <button id="add-folder-btn"
+                            style="display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: transparent; color: white; cursor: pointer; font-size: 13px;">Add
+                            Folder</button>
+                        <button id="import-apps-btn"
+                            style="display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: transparent; color: white; cursor: pointer; font-size: 13px;">Import
+                            Transfer Music</button>
+                        <button id="new-playlist-btn"
+                            style="display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: transparent; color: white; cursor: pointer; font-size: 13px; border-top: 1px solid rgba(255,255,255,0.08);">New
+                            Playlist</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="playlist-section" id="local-tracks-list">
+                <!-- Local tracks will appear here -->
+            </div>
+
+            <input type="file" id="file-input" multiple accept="audio/*" style="display: none;">
+            <input type="file" id="folder-input" webkitdirectory style="display: none;">
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-view">
+            <header class="top-header">
+                <button type="button" class="sidebar-toggle control-btn" id="sidebar-toggle" aria-label="Open menu">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="header-history">
+                    <button type="button" class="control-btn header-back" aria-label="Back"><i class="fas fa-chevron-left"></i></button>
+                    <button type="button" class="control-btn header-fwd header-fwd--hide-mobile" aria-label="Forward"><i class="fas fa-chevron-right"></i></button>
+                </div>
+                <div class="search-container premium-search header-search--always">
+                    <i class="fas fa-search search-icon"></i>
+                    <input type="text" placeholder="Search songs, artists, albums..." class="premium-search-input" aria-label="Search">
+                </div>
+                <div class="user-controls">
+                    <button class="gesture-toggle" id="gesture-toggle" onclick="toggleGestureMode()" aria-hidden="true" tabindex="-1">
+                        <i class="fas fa-hand-paper"></i>
+                        <span>Gestures: OFF</span>
+                    </button>
+                    <button type="button" class="profile-btn" onclick="window.PalmPlayRoutes.go('login')">
+                        <img src="https://ui-avatars.com/api/?name=User&background=FF0000&color=fff" alt="" width="28" height="28" style="border-radius:50%">
+                        <span class="profile-btn-label">Sign In</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- HERO BANNER -->
+            <div class="home-hero" id="home-hero">
+                <div class="home-hero-blur" id="home-hero-blur"></div>
+                <div class="home-hero-noise"></div>
+                <div class="home-hero-content">
+                    <div class="home-hero-text">
+                        <span class="home-hero-label">🎧 Your Vibe</span>
+                        <h2 class="greeting" id="view-header">Good Evening</h2>
+                        <p class="home-hero-sub">Music that moves with you.</p>
+                    </div>
+                    <div class="home-hero-art" id="home-hero-art"></div>
+                </div>
+                <!-- Quick-access chips -->
+                <div class="home-chips-row" id="home-chips-row">
+                    <button class="home-chip home-chip--active" data-chip="all"><i class="fas fa-bolt"></i> All</button>
+                    <button class="home-chip" data-chip="recent"><i class="fas fa-clock"></i> Recent</button>
+                    <button class="home-chip" data-chip="liked"><i class="fas fa-heart"></i> Liked</button>
+                    <button class="home-chip" data-chip="local"><i class="fas fa-folder-open"></i> Local</button>
+                    <button class="home-chip" data-chip="explore" onclick="window.PalmPlayRoutes && window.PalmPlayRoutes.go('explore')"><i class="fas fa-compass"></i> Explore</button>
+                </div>
+            </div>
+
+            <section class="content-wrapper">
+                <div id="main-content">
+                    <div class="card-grid home-feed">
+                        <!-- Content injected by app.js -->
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer class="player-bar" id="player-bar">
+            <div class="player-section player-section--left track-info" id="player-track-info">
+                <div class="album-art"></div>
+                <div class="track-details">
+                    <span class="track-name">Select a song</span>
+                    <span class="artist-name">Discover music below</span>
+                </div>
+                <button type="button" class="control-btn player-like-btn" aria-label="Like"><i class="far fa-heart"></i></button>
+            </div>
+            <div class="player-section player-section--center player-controls">
+                <div class="control-buttons">
+                    <i class="fas fa-random" aria-label="Shuffle"></i>
+                    <i class="fas fa-step-backward" aria-label="Previous"></i>
+                    <div class="play-pause-btn" aria-label="Play"><i class="fas fa-play"></i></div>
+                    <i class="fas fa-step-forward" aria-label="Next"></i>
+                    <i class="fas fa-redo-alt" aria-label="Repeat"></i>
+                </div>
+                <div class="progress-row">
+                    <span class="progress-time" id="time-current">0:00</span>
+                    <div class="progress-container-inline">
+                        <div class="progress-bar">
+                            <div class="progress-fill"></div>
+                        </div>
+                    </div>
+                    <span class="progress-time" id="time-total">0:00</span>
+                </div>
+            </div>
+            <div class="player-section player-section--right volume-controls">
+                <button type="button" class="control-btn" id="share-track-btn" aria-label="Share track"><i class="fas fa-share-alt"></i></button>
+                <button type="button" class="control-btn" id="queue-btn" aria-label="Queue"><i class="fas fa-list-ul"></i></button>
+                <button class="speed-toggle" id="speed-btn">1x</button>
+                <i class="fas fa-volume-up" id="mute-btn" aria-label="Volume"></i>
+                <div class="volume-bar" id="volume-slider">
+                    <div class="volume-fill"></div>
+                </div>
+            </div>
+        </footer>
+    </div>
+    <div id="toast-container"></div>
+
+    <div id="modal-container">
+        <div id="custom-modal">
+            <h3 id="modal-title">Confirm</h3>
+            <p id="modal-message">Are you sure you want to proceed?</p>
+            <input type="text" id="modal-input" class="modal-input" placeholder="Enter name...">
+            <div style="display: flex; gap: 16px; justify-content: center;">
+                <button id="modal-cancel" class="upgrade-btn"
+                    style="background: transparent; border: 1px solid rgba(255,255,255,0.2); color: white;">Cancel</button>
+                <button id="modal-confirm" class="upgrade-btn">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="lib/routes.js"></script>
+    <script src="lib/pwa.js"></script>
+    <script src="catalog-config.js"></script>
+    <script src="env-config.js"></script>
+    <script src="lib/curated-trending.js"></script>
+    <script src="supabase-config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="lib/palmplay-auth.js"></script>
     <script src="lib/palmplay-sync.js"></script>
     <script src="app.js?v=26"></script>
     <script src="palmplay-ux.js?v=5"></script>
+    <script src="palmplay-gestures.js"></script>
+    <script>
+        let isGestureMode = false;
+        function toggleGestureMode() {
+            const btn = document.getElementById('gesture-toggle');
+            const menuBtn = document.getElementById('settings-gestures');
+            isGestureMode = !isGestureMode;
+            
+            if (isGestureMode) {
+                if (btn) btn.innerHTML = '<i class="fas fa-hand-sparkles" style="color:var(--accent)"></i><span style="color:var(--accent)">Gestures: ON</span>';
+                if (menuBtn) menuBtn.innerHTML = '<i class="fas fa-hand-sparkles" style="color:var(--accent)"></i> Gestures: ON';
+                if (!window.palmGestures) {
+                    window.initGestures();
+                } else {
+                    window.palmGestures.resume();
+                }
+            } else {
+                if (btn) btn.innerHTML = '<i class="fas fa-hand-paper"></i><span>Gestures: OFF</span>';
+                if (menuBtn) menuBtn.innerHTML = '<i class="fas fa-hand-paper"></i> Gestures: OFF';
+                if (window.palmGestures) {
+                    window.palmGestures.pause();
+                }
+            }
+        }
+    </script>
 </body>
 
 </html>
