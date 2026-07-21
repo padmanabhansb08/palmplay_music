@@ -286,6 +286,55 @@
             box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
             transform: scale(1.4);
         }
+        @media (max-width: 768px) {
+            .brand-title {
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 24px;
+                letter-spacing: 0.2em;
+            }
+            .visual-stage {
+                width: 80vw;
+                height: 40vh;
+                left: 10%;
+                top: 20%;
+                transform: none;
+            }
+            .narrative-container {
+                left: 5%;
+                width: 90%;
+                height: auto;
+                top: 65%;
+                padding: 0;
+                align-items: center;
+                text-align: center;
+            }
+            .narrative-stage {
+                transform: translateX(0);
+                text-align: center;
+            }
+            .narrative-stage.active {
+                transform: translateX(0);
+            }
+            .narrative-stage h2 {
+                font-size: clamp(32px, 8vw, 48px);
+                margin-bottom: 16px;
+            }
+            .narrative-stage p {
+                font-size: 16px;
+                max-width: 100%;
+            }
+            .explore-wrap {
+                right: auto;
+                left: 50%;
+                transform: translateX(-50%);
+                bottom: 5vh;
+            }
+            .slide-dots {
+                bottom: 15vh;
+            }
+        }
     </style>
 </head>
 

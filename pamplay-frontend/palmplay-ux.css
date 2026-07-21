@@ -1582,6 +1582,7 @@ body.now-playing-open {
 
     .sidebar.open {
         transform: translateX(0);
+        box-shadow: 0 0 0 100vw rgba(0, 0, 0, 0.6);
     }
 
     .sidebar-toggle {
@@ -1596,7 +1597,7 @@ body.now-playing-open {
         grid-template-columns: 1fr;
         grid-template-rows: auto auto;
         height: auto;
-        min-height: var(--player-height);
+        min-height: 56px;
         padding: 10px 12px 12px;
         gap: 8px;
     }
@@ -1799,6 +1800,7 @@ body.now-playing-open {
 
     .now-playing-art {
         width: min(280px, 85vw);
+        aspect-ratio: 1;
     }
 
     .lang-mood-chips-row {
@@ -1806,11 +1808,11 @@ body.now-playing-open {
     }
 
     .category-chips .chip {
-        flex: 1 1 calc(50% - 8px);
+        flex: 1 1 calc(50% - 4px);
     }
 
     #app {
-        padding-bottom: calc(120px + var(--bottom-nav-height) + var(--safe-bottom));
+        padding-bottom: calc(var(--player-height) + env(safe-area-inset-bottom));
     }
 }
 
