@@ -2215,6 +2215,12 @@ body.player-bar-hidden .player-bar {
         transform: scale(0.8);
     }
 
+    .track-info .control-btn {
+        width: 36px;
+        height: 36px;
+        font-size: 14px;
+    }
+
     .progress-row {
         position: absolute;
         bottom: env(safe-area-inset-bottom);
@@ -2234,12 +2240,12 @@ body.player-bar-hidden .player-bar {
         opacity: 0.7;
     }
     
-    .progress-time.current-time {
-        left: 0;
+    #time-current {
+        left: 4px;
     }
     
-    .progress-time.total-time {
-        right: 0;
+    #time-total {
+        right: 4px;
     }
 
     .progress-container-inline {
