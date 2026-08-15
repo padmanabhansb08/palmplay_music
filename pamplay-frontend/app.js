@@ -767,7 +767,13 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function routeInitialView() {
-        renderHome();
+        if (ppRoutes().isExplorePage()) {
+            const discover = !window.location.hash || window.location.hash === '#discover';
+            if (discover) window.PalmPlayNav.go('search', true);
+            else window.PalmPlayNav.go('explore', true);
+        } else {
+            renderHome();
+        }
     }
 
     function setupMediaSession() {
@@ -3790,6 +3796,16 @@ document.addEventListener('DOMContentLoaded', () => {
         greetingEl.style.display = 'block';
         if (exploreHero) exploreHero.style.display = 'none';
         if (categoryChips) categoryChips.style.display = 'none';
+
+        const isExplore = ppRoutes().isExplorePage();
+
+        if (isExplore) {
+            window.renderExplore = renderExplore;
+            const activeChip = document.querySelector('.chip.active');
+            const genre = activeChip ? activeChip.getAttribute('data-genre') : 'Trending';
+            renderExplore(genre);
+            return;
+        }
 
         header.style.backgroundColor = 'transparent';
         const savedUser = getSavedUser();
