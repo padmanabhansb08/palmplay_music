@@ -1274,7 +1274,9 @@ body.now-playing-open {
     bottom: 8px;
     z-index: 5;
     display: flex;
-    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
     opacity: 0;
     transform: translateY(6px);
     transition: opacity 0.2s ease, transform 0.2s ease;
