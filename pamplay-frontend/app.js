@@ -1999,11 +1999,18 @@ document.addEventListener('DOMContentLoaded', () => {
             artistPart = `<button type="button" class="meta-link meta-link--name" data-artist-name="${escapeHtml(artistName)}">${escapeHtml(artistName)}</button>`;
         }
 
-        if (!albumName) return artistPart;
-        if (albId) {
-            return `${artistPart}<span class="meta-sep"> · </span><button type="button" class="meta-link" data-album-id="${escapeHtml(String(albId))}" data-album-name="${escapeHtml(albumName)}" data-album-art="${escapeHtml(track.art || '')}">${escapeHtml(albumName)}</button>`;
+        if (!albumName) {
+            return `<div class="meta-line meta-artist">${artistPart}</div>`;
         }
-        return `${artistPart}<span class="meta-sep"> · </span><span class="meta-album">${escapeHtml(albumName)}</span>`;
+        
+        let albumPart;
+        if (albId) {
+            albumPart = `<button type="button" class="meta-link" data-album-id="${escapeHtml(String(albId))}" data-album-name="${escapeHtml(albumName)}" data-album-art="${escapeHtml(track.art || '')}">${escapeHtml(albumName)}</button>`;
+        } else {
+            albumPart = `<span class="meta-album">${escapeHtml(albumName)}</span>`;
+        }
+        
+        return `<div class="meta-line meta-artist">${artistPart}</div><div class="meta-line meta-album">${albumPart}</div>`;
     }
 
     async function renderArtistPage(artistId, artistName) {
@@ -5268,7 +5275,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 const playsLabel = track.plays > 0
                                     ? `${(track.plays / 1000).toFixed(0)}K plays`
                                     : track.album;
-                                desc.innerHTML = `${buildTrackMetaLine(track)}<span class="meta-sep"> · </span><span class="meta-plays">${escapeHtml(playsLabel)}</span>`;
+                                desc.innerHTML = `${buildTrackMetaLine(track)}<div class="meta-line meta-plays">${escapeHtml(playsLabel)}</div>`;
                             }
                         }
                         catalogGrid.appendChild(card);
