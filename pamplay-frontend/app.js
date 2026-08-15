@@ -3791,16 +3791,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (exploreHero) exploreHero.style.display = 'none';
         if (categoryChips) categoryChips.style.display = 'none';
 
-        const isExplore = ppRoutes().isExplorePage();
-
-        if (isExplore) {
-            window.renderExplore = renderExplore;
-            const activeChip = document.querySelector('.chip.active');
-            const genre = activeChip ? activeChip.getAttribute('data-genre') : 'Trending';
-            renderExplore(genre);
-            return;
-        }
-
         header.style.backgroundColor = 'transparent';
         const savedUser = getSavedUser();
         const isLoggedIn = isUserLoggedIn();
