@@ -767,13 +767,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     function routeInitialView() {
-        if (ppRoutes().isExplorePage()) {
-            const discover = !window.location.hash || window.location.hash === '#discover';
-            if (discover) window.PalmPlayNav.go('search', true);
-            else window.PalmPlayNav.go('explore', true);
-        } else {
-            renderHome();
-        }
+        renderHome();
     }
 
     function setupMediaSession() {
