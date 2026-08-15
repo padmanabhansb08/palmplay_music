@@ -1637,7 +1637,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v6';
+    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v7';
     const HOME_FEED_TTL_MS = 5 * 60 * 1000;
     const CURATED_RESOLVED_CACHE_KEY = 'palmplay_curated_resolved_v1';
     const CURATED_RESOLVED_TTL_MS = 60 * 60 * 1000;
@@ -2759,7 +2759,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('Home feed cache read failed', e);
         }
 
-        const trending = await fetchCuratedTrendingTracks(20);
+        let trending = await fetchCuratedTrendingTracks(20);
         let picks = [];
         let artists = [];
         let albums = [];
