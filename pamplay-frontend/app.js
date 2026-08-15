@@ -1637,7 +1637,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v4';
+    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v6';
     const HOME_FEED_TTL_MS = 5 * 60 * 1000;
     const CURATED_RESOLVED_CACHE_KEY = 'palmplay_curated_resolved_v1';
     const CURATED_RESOLVED_TTL_MS = 60 * 60 * 1000;
@@ -2761,16 +2761,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const trending = await fetchCuratedTrendingTracks(20);
         let picks = [];
+        let artists = [];
+        let albums = [];
+        let allMusic = [];
         try {
             picks = await fetchCatalogTracks('latest hits', 8);
+            artists = await fetchCatalogTracks('top artists', 8);
+            albums = await fetchCatalogTracks('top albums', 8);
+            allMusic = await fetchCatalogTracks('popular tracks', 8);
         } catch (e) {
             console.warn('Home picks fetch failed', e);
         }
-        if (!picks.length && trending.length) {
+        if (!picks.length && trending.length === 0) {
+            // API is down or empty, use fallback mock data from curated list
+            const mockList = (window.PALMPLAY_CURATED_TRENDING || []).slice(0, 24).map((item, i) => ({
+                id: 'mock_' + i,
+                name: item.name,
+                artist: item.artist,
+                album: 'Trending Collection',
+                duration: 200,
+                url: '',
+                art: window.DEFAULT_ART_URL || 'https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=300&h=300&fit=crop'
+            }));
+            
+            trending = mockList.slice(0, 10);
+            picks = mockList.slice(10, 15);
+            artists = mockList.slice(15, 20);
+            albums = mockList.slice(20, 24);
+            allMusic = mockList.slice(0, 8);
+        } else if (!picks.length && trending.length) {
             picks = trending.slice(8, 20);
+            artists = trending.slice(0, 8);
+            albums = trending.slice(4, 12);
+            allMusic = trending.slice(2, 10);
         }
 
-        const data = { trending: trending || [], picks: picks || [] };
+        const data = { 
+            trending: trending || [], 
+            picks: picks || [],
+            artists: artists || [],
+            albums: albums || [],
+            allMusic: allMusic || []
+        };
         try {
             sessionStorage.setItem(HOME_FEED_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
         } catch (e) {
@@ -3700,10 +3732,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (history.length) {
-            renderTrackRow(cardGrid, 'Continue listening', 'Pick up where you left off', history, 'home_continue');
+            renderTrackRow(cardGrid, 'History', 'Recently played songs', history, 'home_continue');
         }
 
-        renderTrackRow(cardGrid, 'Trending now', 'Popular on PalmPlay', feed.trending, 'home_trending');
+        renderTrackRow(cardGrid, 'Trending Songs', 'Popular on PalmPlay', feed.trending, 'home_trending');
+        renderTrackRow(cardGrid, 'Top Artists', 'Discover new artists', feed.artists, 'home_artists');
+        renderTrackRow(cardGrid, 'Top Albums', 'Binge listen', feed.albums, 'home_albums');
+        renderTrackRow(cardGrid, 'All Music', 'More to explore', feed.allMusic, 'home_all');
         renderTrackRow(cardGrid, 'Fresh picks', 'Curated for you', feed.picks, 'home_picks');
 
         renderHomeQuickActions(cardGrid);
@@ -5601,8 +5636,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // ──────────────────────────────────────────────────────────────────────────
 
     function startInteractiveTour() {
-        document.getElementById('tour-overlay')?.remove();
-        document.getElementById('tour-spotlight')?.remove();
+        return; // Disabled per user request
+
         document.getElementById('tour-bubble')?.remove();
 
         const steps = [
