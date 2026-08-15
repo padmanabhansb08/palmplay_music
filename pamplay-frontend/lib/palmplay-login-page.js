@@ -48,7 +48,19 @@
     }
 
     async function initAuthForms(mode) {
-        await window.PalmPlayAuth?.init?.();
+        // Attach form listeners immediately so default submission (refresh) is always prevented
+        if (mode === 'login') {
+            document.getElementById('login-form')?.addEventListener('submit', handleLoginSubmit);
+        } else if (mode === 'signup') {
+            document.getElementById('signup-form')?.addEventListener('submit', handleSignupSubmit);
+        }
+
+        try {
+            await window.PalmPlayAuth?.init?.();
+        } catch (e) {
+            console.warn('Auth init failed:', e);
+            // Proceed anyway, let the submit handler show the error
+        }
         const useCloud = window.PalmPlayAuth?.isConfigured?.();
         const subtitle = document.querySelector('.login-subtitle');
         if (subtitle && useCloud) {
@@ -63,39 +75,39 @@
             }
         }
 
-        if (mode === 'login') {
-            document.getElementById('login-form')?.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const email = document.getElementById('login-email')?.value?.trim();
-                const password = document.getElementById('login-pass')?.value;
-                if (!email || !password) return;
 
-                if (useCloud) {
-                    if (!window.PalmPlayCaptcha?.requireTokenOrToast?.(showToast)) return;
-                    const captchaToken = window.PalmPlayCaptcha?.getToken?.();
-                    try {
-                        const user = await window.PalmPlayAuth.signIn(email, password, captchaToken);
-                        await afterAuth(user.name || email);
-                    } catch (err) {
-                        showToast(friendlyAuthError(err));
-                        window.PalmPlayCaptcha?.reset?.();
-                    }
-                    return;
-                }
+        async function handleLoginSubmit(e) {
+            e.preventDefault();
+            const email = document.getElementById('login-email')?.value?.trim();
+            const password = document.getElementById('login-pass')?.value;
+            if (!email || !password) return;
 
-                const users = JSON.parse(localStorage.getItem('palmplay_registered_users') || '[]');
-                const user = users.find((u) => u.email === email && u.password === password);
-                if (user) {
-                    setLocalSession(user.name, email);
-                    await afterAuth(user.name);
-                } else {
-                    showToast('Invalid email or password. Please try again.');
+            const useCloud = window.PalmPlayAuth?.isConfigured?.();
+
+            if (useCloud) {
+                if (!window.PalmPlayCaptcha?.requireTokenOrToast?.(showToast)) return;
+                const captchaToken = window.PalmPlayCaptcha?.getToken?.();
+                try {
+                    const user = await window.PalmPlayAuth.signIn(email, password, captchaToken);
+                    await afterAuth(user.name || email);
+                } catch (err) {
+                    showToast(friendlyAuthError(err));
+                    window.PalmPlayCaptcha?.reset?.();
                 }
-            });
+                return;
+            }
+
+            const users = JSON.parse(localStorage.getItem('palmplay_registered_users') || '[]');
+            const user = users.find((u) => u.email === email && u.password === password);
+            if (user) {
+                setLocalSession(user.name, email);
+                await afterAuth(user.name);
+            } else {
+                showToast('Invalid email or password. Please try again.');
+            }
         }
 
-        if (mode === 'signup') {
-            document.getElementById('signup-form')?.addEventListener('submit', async (e) => {
+        async function handleSignupSubmit(e) {
                 e.preventDefault();
                 const profileName = document.getElementById('signup-name')?.value?.trim();
                 const email = document.getElementById('signup-email')?.value?.trim();
@@ -124,20 +136,19 @@
                     return;
                 }
 
-                const users = JSON.parse(localStorage.getItem('palmplay_registered_users') || '[]');
-                if (users.find((u) => u.email === email)) {
-                    showToast('An account with this email already exists. Please log in.');
-                    setTimeout(() => {
-                        window.location.href = window.PalmPlayRoutes?.page('login') || 'login.html';
-                    }, 2000);
-                    return;
-                }
-                users.push({ name: profileName, email, password });
-                localStorage.setItem('palmplay_registered_users', JSON.stringify(users));
-                setLocalSession(profileName, email);
-                showToast(`Welcome to PalmPlay, ${profileName}! Redirecting...`);
-                setTimeout(redirectHome, 1500);
-            });
+            const users = JSON.parse(localStorage.getItem('palmplay_registered_users') || '[]');
+            if (users.find((u) => u.email === email)) {
+                showToast('An account with this email already exists. Please log in.');
+                setTimeout(() => {
+                    window.location.href = window.PalmPlayRoutes?.page('login') || 'login.html';
+                }, 2000);
+                return;
+            }
+            users.push({ name: profileName, email, password });
+            localStorage.setItem('palmplay_registered_users', JSON.stringify(users));
+            setLocalSession(profileName, email);
+            showToast(`Welcome to PalmPlay, ${profileName}! Redirecting...`);
+            setTimeout(redirectHome, 1500);
         }
     }
 
