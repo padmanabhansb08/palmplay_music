@@ -4318,7 +4318,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.innerHTML = `
                 <td class="track-index-cell">${(tIndex + 1).toString().padStart(2, '0')}</td>
                 <td style="display:flex; align-items:center;">
-                    <img src="${track.art}" class="row-art">
+                    <img src="${track.art}" class="row-art" loading="lazy">
                     <div>
                         <div class="track-name-bold">${track.name}</div>
                         <div class="track-artist-small">${track.artist}</div>
@@ -5567,7 +5567,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.innerHTML = `
                 <td class="track-index-cell">${(tIndex + 1).toString().padStart(2, '0')}</td>
                 <td style="display:flex; align-items:center;">
-                    <img src="${artSrc}" class="row-art">
+                    <img src="${artSrc}" class="row-art" loading="lazy">
                     <div>
                         <div class="track-name-bold">${liked.trackName}</div>
                         <div class="track-artist-small">${liked.artist}</div>

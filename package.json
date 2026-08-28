@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "config": "node scripts/generate-config.js",
-    "build": "node scripts/generate-config.js",
+    "build": "node scripts/generate-config.js && npx terser pamplay-frontend/app.js -o pamplay-frontend/app.js -c -m && npx clean-css-cli -o pamplay-frontend/style.css pamplay-frontend/style.css",
     "prestart": "node scripts/generate-config.js",
     "start": "npx http-server -p 8000"
   },
