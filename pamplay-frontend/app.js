@@ -2655,7 +2655,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getCachedCuratedTracks() {
         try {
-            const raw = sessionStorage.getItem(CURATED_RESOLVED_CACHE_KEY);
+            const raw = localStorage.getItem(CURATED_RESOLVED_CACHE_KEY);
             if (!raw) return null;
             const { ts, tracks } = JSON.parse(raw);
             if (!tracks?.length || Date.now() - ts > CURATED_RESOLVED_TTL_MS) return null;
@@ -2667,7 +2667,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setCachedCuratedTracks(tracks) {
         try {
-            sessionStorage.setItem(CURATED_RESOLVED_CACHE_KEY, JSON.stringify({
+            localStorage.setItem(CURATED_RESOLVED_CACHE_KEY, JSON.stringify({
                 ts: Date.now(),
                 tracks: tracks || []
             }));
@@ -2719,7 +2719,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function readHomeFeedCache() {
         try {
-            const cached = sessionStorage.getItem(HOME_FEED_CACHE_KEY);
+            const cached = localStorage.getItem(HOME_FEED_CACHE_KEY);
             if (!cached) return null;
             const { data } = JSON.parse(cached);
             return data || null;
@@ -2730,7 +2730,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getHomeFeedCacheAgeMs() {
         try {
-            const cached = sessionStorage.getItem(HOME_FEED_CACHE_KEY);
+            const cached = localStorage.getItem(HOME_FEED_CACHE_KEY);
             if (!cached) return Infinity;
             const { ts } = JSON.parse(cached);
             return Date.now() - (ts || 0);
@@ -2741,7 +2741,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchHomeFeed() {
         try {
-            const cached = sessionStorage.getItem(HOME_FEED_CACHE_KEY);
+            const cached = localStorage.getItem(HOME_FEED_CACHE_KEY);
             if (cached) {
                 const { ts, data } = JSON.parse(cached);
                 if (Date.now() - ts < HOME_FEED_TTL_MS && data) return data;
@@ -2799,7 +2799,7 @@ document.addEventListener('DOMContentLoaded', () => {
             allMusic: allMusic || []
         };
         try {
-            sessionStorage.setItem(HOME_FEED_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+            localStorage.setItem(HOME_FEED_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
         } catch (e) {
             console.warn('Home feed cache write failed', e);
         }
@@ -5604,7 +5604,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const PLAYBACK_KEY = 'pp_playback_state';
         let saved;
         try {
-            const raw = sessionStorage.getItem(PLAYBACK_KEY);
+            const raw = localStorage.getItem(PLAYBACK_KEY);
             saved = raw ? JSON.parse(raw) : null;
         } catch (e) { saved = null; }
 
@@ -5612,12 +5612,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Only restore if saved within the last 30 seconds (i.e. just navigated)
         if (Date.now() - saved.savedAt > 30000) {
-            sessionStorage.removeItem(PLAYBACK_KEY);
+            localStorage.removeItem(PLAYBACK_KEY);
             return;
         }
 
         // Clear so it doesn't restore again on next load
-        sessionStorage.removeItem(PLAYBACK_KEY);
+        localStorage.removeItem(PLAYBACK_KEY);
 
         // Restore player bar UI immediately (no async needed)
         if (trackNameEl) trackNameEl.textContent = saved.trackName;
