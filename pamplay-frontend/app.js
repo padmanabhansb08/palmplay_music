@@ -2683,41 +2683,36 @@ document.addEventListener('DOMContentLoaded', () => {
         const list = (window.PALMPLAY_CURATED_TRENDING || []).slice(0, limit);
         if (!list.length) return [];
 
-        const resolved = [];
-        const batchSize = 8;
-        for (let i = 0; i < list.length; i += batchSize) {
-            const batch = list.slice(i, i + batchSize);
-            const chunk = await Promise.all(
-                batch.map(async (item) => {
-                    const q = `${item.name} ${item.artist}`;
-                    try {
-                        let tracks = await fetchCatalogTracks(q, 8);
-                        let picked = pickCuratedMatch(tracks, item);
-                        if (!picked || picked.score < 0.62) {
-                            const retryTracks = await fetchCatalogTracks(item.name, 8);
-                            const retryPicked = pickCuratedMatch(retryTracks, item);
-                            if (retryPicked && (!picked || retryPicked.score > picked.score)) {
-                                picked = retryPicked;
-                            }
+        const resolved = await Promise.all(
+            list.map(async (item) => {
+                const q = `${item.name} ${item.artist}`;
+                try {
+                    let tracks = await fetchCatalogTracks(q, 4); // reduced count for speed
+                    let picked = pickCuratedMatch(tracks, item);
+                    if (!picked || picked.score < 0.62) {
+                        const retryTracks = await fetchCatalogTracks(item.name, 4);
+                        const retryPicked = pickCuratedMatch(retryTracks, item);
+                        if (retryPicked && (!picked || retryPicked.score > picked.score)) {
+                            picked = retryPicked;
                         }
-                        const match = picked?.track;
-                        if (!match?.url) return null;
-                        const confidentArt = (picked?.score || 0) >= 0.7;
-                        return {
-                            ...match,
-                            name: item.name,
-                            artist: item.artist,
-                            art: confidentArt ? (match.art || DEFAULT_ART_URL) : DEFAULT_ART_URL
-                        };
-                    } catch (e) {
-                        console.warn('Curated track resolve failed:', q, e);
-                        return null;
                     }
-                })
-            );
-            resolved.push(...chunk.filter(Boolean));
-        }
-        const finalTracks = resolved.length ? resolved : [];
+                    const match = picked?.track;
+                    if (!match?.url) return null;
+                    const confidentArt = (picked?.score || 0) >= 0.7;
+                    return {
+                        ...match,
+                        name: item.name,
+                        artist: item.artist,
+                        art: confidentArt ? (match.art || DEFAULT_ART_URL) : DEFAULT_ART_URL
+                    };
+                } catch (e) {
+                    console.warn('Curated track resolve failed:', q, e);
+                    return null;
+                }
+            })
+        );
+        const validResolved = resolved.filter(Boolean);
+        const finalTracks = validResolved.length ? validResolved : [];
         if (finalTracks?.length) setCachedCuratedTracks(finalTracks);
         return finalTracks;
     }
