@@ -7,6 +7,7 @@
       "source": "/",
       "destination": "/app",
       "permanent": false
+    }
   ],
   "rewrites": [
     { "source": "/app", "destination": "/pamplay-frontend/home.html" },
