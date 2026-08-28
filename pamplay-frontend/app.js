@@ -2755,16 +2755,20 @@ document.addEventListener('DOMContentLoaded', () => {
             console.warn('Home feed cache read failed', e);
         }
 
-        let trending = await fetchCuratedTrendingTracks(20);
+        let trending = [];
         let picks = [];
         let artists = [];
         let albums = [];
         let allMusic = [];
+
         try {
-            picks = await fetchCatalogTracks('latest hits', 8);
-            artists = await fetchCatalogTracks('top artists', 8);
-            albums = await fetchCatalogTracks('top albums', 8);
-            allMusic = await fetchCatalogTracks('popular tracks', 8);
+            [trending, picks, artists, albums, allMusic] = await Promise.all([
+                fetchCuratedTrendingTracks(20).catch(e => { console.warn(e); return []; }),
+                fetchCatalogTracks('latest hits', 8).catch(() => []),
+                fetchCatalogTracks('top artists', 8).catch(() => []),
+                fetchCatalogTracks('top albums', 8).catch(() => []),
+                fetchCatalogTracks('popular tracks', 8).catch(() => [])
+            ]);
         } catch (e) {
             console.warn('Home picks fetch failed', e);
         }
