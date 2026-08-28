@@ -3979,7 +3979,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ).join('');
 
         // Secondary mood/genre filter — one chip row, results load into their own grid
-        const exploreCategories = ['Trending', 'Pop', 'Hip-Hop', 'Chill', 'Workout', 'Focus', 'Party'];
+        const exploreCategories = ['Trending', ...Object.keys(PALMPLAY_MOODS).sort()];
         const categoryChipsHtml = exploreCategories.map((c, i) =>
             `<button type="button" class="chip explore-chip${i === 0 ? ' active' : ''}" data-genre="${escapeHtml(c)}">${escapeHtml(c)}</button>`
         ).join('');
