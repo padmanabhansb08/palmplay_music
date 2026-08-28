@@ -27,9 +27,6 @@
                     <button type="button" class="bottom-nav-item" data-bottom-nav="home" aria-label="Home">
                         <i class="fas fa-home"></i><span>Home</span>
                     </button>
-                    <button type="button" class="bottom-nav-item" data-bottom-nav="discover" aria-label="Discover">
-                        <i class="fas fa-search"></i><span>Discover</span>
-                    </button>
                     <button type="button" class="bottom-nav-item" data-bottom-nav="explore" aria-label="Explore">
                         <i class="fas fa-compass"></i><span>Explore</span>
                     </button>
@@ -195,14 +192,6 @@
                             return;
                         }
                         window.PalmPlayNav?.go('explore');
-                        return;
-                    }
-                    if (key === 'discover') {
-                        if (!isExplorePage && !isHomePage) {
-                            window.location.href = routes?.page('discover') || 'explore.html#discover';
-                            return;
-                        }
-                        window.PalmPlayNav?.go('search');
                         return;
                     }
                     if (key === 'library') {
@@ -549,21 +538,9 @@
         },
 
         defaultRoute() {
-            const hash = window.location.hash.replace('#', '');
-            if (hash === 'discover' && window.PalmPlayNav) {
-                setTimeout(() => window.PalmPlayNav.go('search'), 200);
-                this.activateBottomNav('discover');
-                return;
-            }
             const routes = window.PalmPlayRoutes;
             if (routes?.isExplorePage?.()) {
-                const active = document.querySelector('.nav-item.active');
-                const label = active?.textContent.trim().toLowerCase();
-                if (label === 'search') {
-                    this.activateBottomNav('discover');
-                } else if (label === 'explore') {
-                    this.activateBottomNav('explore');
-                }
+                this.activateBottomNav('explore');
             } else if (routes?.isHomePage?.()) {
                 this.activateBottomNav('home');
             }

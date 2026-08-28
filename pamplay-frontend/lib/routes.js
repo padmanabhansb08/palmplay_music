@@ -19,7 +19,6 @@
     const pages = {
         home:    useCleanUrls ? '/app'                 : `${base}/home.html`,
         explore: useCleanUrls ? '/app/explore'         : `${base}/explore.html`,
-        discover:useCleanUrls ? '/app/explore#discover': `${base}/explore.html#discover`,
         login:   useCleanUrls ? '/app/login'           : `${base}/login.html`,
         signup:  useCleanUrls ? '/app/signup'          : `${base}/signup.html`,
         premium: useCleanUrls ? '/app/premium'         : `${base}/premium.html`,

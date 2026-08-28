@@ -11,6 +11,39 @@ const catalogTraffic = {
     recordEnd() {}
 };
 
+// Shared mood taxonomy — single source used by both the Explore language pages
+// (mood chips/rows within a chosen language) and the Home mood-tiles row, so the
+// two surfaces never drift into separate lists.
+const PALMPLAY_MOODS = {
+    'Romantic':   { icon: 'fa-heart',        grad: 'linear-gradient(135deg, #F472B6, #BE185D)' },
+    'Party':      { icon: 'fa-glass-cheers', grad: 'linear-gradient(135deg, #F97316, #C2410C)' },
+    'Chill':      { icon: 'fa-cloud-moon',   grad: 'linear-gradient(135deg, #22D3EE, #0E7490)' },
+    'Devotional': { icon: 'fa-pray',         grad: 'linear-gradient(135deg, #FBBF24, #B45309)' },
+    'Workout':    { icon: 'fa-dumbbell',     grad: 'linear-gradient(135deg, #34D399, #047857)' },
+    'Sad':        { icon: 'fa-cloud-rain',   grad: 'linear-gradient(135deg, #818CF8, #4338CA)' },
+    'Kuthu':      { icon: 'fa-drum',         grad: 'linear-gradient(135deg, #FB923C, #9A3412)' },
+    'Melody':     { icon: 'fa-music',        grad: 'linear-gradient(135deg, #A78BFA, #6D28D9)' },
+    'Mass':       { icon: 'fa-bolt',         grad: 'linear-gradient(135deg, #F43F5E, #9F1239)' },
+    'Folk':       { icon: 'fa-leaf',         grad: 'linear-gradient(135deg, #4ADE80, #15803D)' },
+    'Bhangra':    { icon: 'fa-drum',         grad: 'linear-gradient(135deg, #FDE047, #A16207)' },
+    'Pop':        { icon: 'fa-star',         grad: 'linear-gradient(135deg, #60A5FA, #1D4ED8)' },
+    'Hip-Hop':    { icon: 'fa-microphone',   grad: 'linear-gradient(135deg, #FB7185, #BE123C)' },
+    'Rock':       { icon: 'fa-guitar',       grad: 'linear-gradient(135deg, #F87171, #7F1D1D)' },
+    'R&B':        { icon: 'fa-heart',        grad: 'linear-gradient(135deg, #E879F9, #86198F)' },
+    'EDM':        { icon: 'fa-bolt',         grad: 'linear-gradient(135deg, #38BDF8, #075985)' },
+    'K-Pop':      { icon: 'fa-star',         grad: 'linear-gradient(135deg, #F0ABFC, #A21CAF)' },
+    'Ballad':     { icon: 'fa-feather',      grad: 'linear-gradient(135deg, #93C5FD, #1E40AF)' },
+    'Dance':      { icon: 'fa-shoe-prints',  grad: 'linear-gradient(135deg, #FCA5A5, #B91C1C)' },
+    'Reggaeton':  { icon: 'fa-fire',         grad: 'linear-gradient(135deg, #FDBA74, #C2410C)' },
+    'Latin Pop':  { icon: 'fa-sun',          grad: 'linear-gradient(135deg, #FDE68A, #B45309)' },
+    'Bachata':    { icon: 'fa-heart',        grad: 'linear-gradient(135deg, #FCA5A5, #9F1239)' },
+    'Classic':    { icon: 'fa-landmark',     grad: 'linear-gradient(135deg, #CBD5E1, #475569)' },
+    'Focus':      { icon: 'fa-brain',        grad: 'linear-gradient(135deg, #67E8F9, #155E75)' },
+};
+
+// Curated subset surfaced directly on Home (Gaana/Wynk-style 1-tap mood browsing).
+const HOME_MOOD_PICKS = ['Party', 'Chill', 'Romantic', 'Workout', 'Devotional', 'Sad', 'Melody', 'Pop'];
+
 // Local Music Database & State
 let playlists = []; // Array of { name: string, tracks: [] }
 let likedSongs = []; // Array of liked track references
@@ -21,7 +54,7 @@ const state = {
     isShuffle: false,
     volume: 0.7,
     progress: 0,
-    currentView: 'home', // 'home', 'search', 'playlist'
+    currentView: 'home', // 'home', 'explore', 'playlist'
     activePlaylistId: null,
     isLiked: false,
     repeatMode: 0, // 0: None, 1: All, 2: One
@@ -121,18 +154,6 @@ function setMasterVolume(vol) {
     masterGain.gain.value = vol;
 }
 // ─────────────────────────────────────────────────────────────────────────────
-
-const dynamicWishes = [
-    "A Pleasant Morning", "A Happy Morning", "A Refreshing Day",
-    "A Musical Afternoon", "A Serene Evening", "Lovely Evening",
-    "Explore the Treat to Your Ears", "Dive into the Rhythm",
-    "Your Musical Sanctuary", "Feel the Vibration",
-    "Echoes of your Soul", "A Grand Welcome"
-];
-
-function getRandomWish() {
-    return dynamicWishes[Math.floor(Math.random() * dynamicWishes.length)];
-}
 
 function getTimeGreeting() {
     const hour = new Date().getHours();
@@ -615,43 +636,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             if (state.currentView === 'artist' || state.currentView === 'album') {
-                this.go('search', true);
+                this.go('explore', true);
                 return;
             }
             if (state.currentView === 'language') {
-                this.go('search', true);
+                this.go('explore', true);
                 return;
             }
             if (state.currentView === 'library') {
                 this.go('home', true);
                 return;
             }
-            this.go(ppRoutes().isExplorePage() ? 'search' : 'home', true);
+            this.go(ppRoutes().isExplorePage() ? 'explore' : 'home', true);
         },
         go(view, fromHistory = false) {
             if (!fromHistory) this.push(view);
             const onExplore = ppRoutes().isExplorePage();
 
-            if (view === 'search') {
-                state.currentView = 'search';
+            if (view === 'explore' && onExplore) {
+                state.currentView = 'explore';
                 setHeaderSearchVisible(true);
                 if (viewHeader) viewHeader.style.display = 'none';
                 if (exploreHero) exploreHero.style.display = 'none';
                 if (categoryChips) categoryChips.style.display = 'none';
                 greetingEl && (greetingEl.style.display = 'none');
-                renderSearch();
-                window.PalmPlayUX?.activateBottomNav?.('discover');
-                return;
-            }
-            if (view === 'explore' && onExplore) {
-                state.currentView = 'explore';
-                setHeaderSearchVisible(true);
-                if (viewHeader) viewHeader.style.display = 'block';
-                if (exploreHero) exploreHero.style.display = 'flex';
-                if (categoryChips) categoryChips.style.display = 'flex';
-                greetingEl && (greetingEl.style.display = 'block');
-                const chip = document.querySelector('.chip.active');
-                renderExplore(chip?.getAttribute('data-genre') || 'Trending');
+                renderExplore();
                 window.PalmPlayUX?.activateBottomNav?.('explore');
                 return;
             }
@@ -768,9 +777,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function routeInitialView() {
         if (ppRoutes().isExplorePage()) {
-            const discover = !window.location.hash || window.location.hash === '#discover';
-            if (discover) window.PalmPlayNav.go('search', true);
-            else window.PalmPlayNav.go('explore', true);
+            window.PalmPlayNav.go('explore', true);
         } else {
             renderHome();
         }
@@ -872,7 +879,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const params = new URLSearchParams(window.location.search);
         if (params.get('q') && ppRoutes().isExplorePage()) {
             const q = decodeURIComponent(params.get('q'));
-            window.PalmPlayNav?.go('search', true);
+            window.PalmPlayNav?.go('explore', true);
             const input = document.querySelector('.premium-search-input');
             if (input) {
                 input.value = q;
@@ -1160,25 +1167,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 const href = link.getAttribute('href') || '';
                 const onExplorePage = ppRoutes().isExplorePage();
                 const routeKey = link.getAttribute('data-pp-route') || '';
-                const isDiscover = routeKey === 'discover' || href.includes('#discover') || link.textContent.trim().toLowerCase() === 'discover';
-                const isExploreOnly = routeKey === 'explore' || link.hasAttribute('data-nav-explore') || (link.textContent.trim().toLowerCase() === 'explore' && !href.includes('#discover'));
+                const isExplore = routeKey === 'explore' || href.includes('explore');
 
                 if ((routeKey === 'home' || href.includes('home')) && !ppRoutes().isHomePage()) return;
-                if ((routeKey === 'explore' || href.includes('explore')) && !href.includes('#') && !onExplorePage && isExploreOnly) return;
+                if (isExplore && !onExplorePage) return;
 
                 e.preventDefault();
                 navLinks.forEach(l => l.classList.remove('active'));
                 link.classList.add('active');
-                window.PalmPlayUX?.activateBottomNav?.(isDiscover ? 'discover' : isExploreOnly ? 'explore' : 'home');
+                window.PalmPlayUX?.activateBottomNav?.(isExplore ? 'explore' : 'home');
 
-                if (isDiscover) {
-                    window.PalmPlayNav.go('search');
-                } else if (isExploreOnly && onExplorePage) {
+                if (isExplore) {
                     window.PalmPlayNav.go('explore');
-                } else if (routeKey === 'home' || href.includes('home')) {
-                    window.PalmPlayNav.go('home');
                 } else {
-                    window.PalmPlayNav.go('search');
+                    window.PalmPlayNav.go('home');
                 }
             });
         });
@@ -1189,27 +1191,14 @@ document.addEventListener('DOMContentLoaded', () => {
             filterCards(e.target.value);
         });
         searchInput.addEventListener('focus', () => {
-            if (ppRoutes().isHomePage() && state.currentView !== 'search') {
-                window.location.href = ppRoutes().page('discover');
+            if (ppRoutes().isHomePage() && state.currentView !== 'explore') {
+                window.location.href = ppRoutes().page('explore');
             }
         });
 
         // Back Navigation
         const backBtn = document.querySelector('.header-back') || document.querySelector('.top-header .fa-chevron-left')?.closest('button');
         if (backBtn) backBtn.onclick = () => window.PalmPlayNav.back();
-
-        // Category Chips for Explore Page
-        const chips = document.querySelectorAll('.chip');
-        chips.forEach(chip => {
-            chip.addEventListener('click', (e) => {
-                chips.forEach(c => c.classList.remove('active'));
-                chip.classList.add('active');
-                const genre = chip.getAttribute('data-genre') || 'Trending';
-                if (window.renderExplore) {
-                    window.renderExplore(genre);
-                }
-            });
-        });
 
         // Shuffle Control
         const playerShuffle = document.querySelector('.player-bar .fa-random');
@@ -2016,7 +2005,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function renderArtistPage(artistId, artistName) {
         state.currentView = 'artist';
         showDetailChrome(
-            `<button type="button" class="crumb-link" data-crumb="discover">Discover</button><span class="crumb-sep"> › </span><span>Artist</span>`,
+            `<button type="button" class="crumb-link" data-crumb="explore">Explore</button><span class="crumb-sep"> › </span><span>Artist</span>`,
             artistName || 'Artist'
         );
 
@@ -2066,7 +2055,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showErrorState(cardGrid, {
                 icon: 'fa-user-music',
                 title: 'No songs found',
-                message: 'Try searching for this artist on Discover.',
+                message: 'Try searching for this artist on Explore.',
                 onRetry: () => openArtistPage(artistId, artistName)
             });
             return;
@@ -2090,7 +2079,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function renderAlbumPage(albumId, albumName, artUrl) {
         state.currentView = 'album';
         showDetailChrome(
-            `<button type="button" class="crumb-link" data-crumb="discover">Discover</button><span class="crumb-sep"> › </span><span>Album</span>`,
+            `<button type="button" class="crumb-link" data-crumb="explore">Explore</button><span class="crumb-sep"> › </span><span>Album</span>`,
             albumName || 'Album'
         );
 
@@ -2143,8 +2132,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function bindDetailBreadcrumb(root) {
-        root.querySelectorAll('[data-crumb="discover"]').forEach((btn) => {
-            btn.onclick = () => window.PalmPlayNav.go('search');
+        root.querySelectorAll('[data-crumb="explore"]').forEach((btn) => {
+            btn.onclick = () => window.PalmPlayNav.go('explore');
         });
         root.querySelectorAll('.detail-hero-artist[data-artist-name]').forEach((btn) => {
             btn.onclick = () => openArtistPage(null, btn.getAttribute('data-artist-name'));
@@ -2321,12 +2310,12 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (q) {
             const decoded = decodeURIComponent(q);
             if (!ppRoutes().isExplorePage()) {
-                const redirectUrl = new URL(ppRoutes().page('discover'), window.location.origin);
+                const redirectUrl = new URL(ppRoutes().page('explore'), window.location.origin);
                 redirectUrl.searchParams.set('q', decoded);
                 window.location.href = redirectUrl.toString();
                 return;
             }
-            window.PalmPlayNav?.go('search');
+            window.PalmPlayNav?.go('explore');
             const input = document.querySelector('.premium-search-input');
             if (input) {
                 input.value = decoded;
@@ -3511,12 +3500,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return card;
     }
 
-    function appendHomeSection(parent, title, subtitle) {
+    function appendHomeSection(parent, title, subtitle, variant) {
         const section = document.createElement('section');
-        section.className = 'home-section';
+        section.className = variant ? `home-section home-section--${variant}` : 'home-section';
+        const badge = variant === 'spotlight' ? '<span class="home-section-badge"><i class="fas fa-star"></i> Made for you</span>' : '';
         section.innerHTML = `
             <div class="home-section-head">
                 <div>
+                    ${badge}
                     <h3 class="home-section-title">${escapeHtml(title)}</h3>
                     ${subtitle ? `<p class="home-section-sub">${escapeHtml(subtitle)}</p>` : ''}
                 </div>
@@ -3530,9 +3521,65 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderTrackRow(parent, title, subtitle, tracks, playlistId, options = {}) {
         if (!tracks?.length) return;
         const organizedTracks = organizeTracksForSelection(tracks, tracks.length);
-        const grid = appendHomeSection(parent, title, subtitle);
+        const grid = appendHomeSection(parent, title, subtitle, options.variant);
         const plIndex = upsertTempPlaylist(playlistId, title, organizedTracks);
         organizedTracks.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx, options.cardOptions)));
+    }
+
+    // Bright, tappable mood tiles surfaced directly on Home (Gaana/Wynk-style
+    // 1-tap browsing) — icons/gradients come from the shared PALMPLAY_MOODS
+    // taxonomy also used by Explore's language mood pages.
+    function renderHomeMoodTiles(parent) {
+        const section = document.createElement('section');
+        section.className = 'home-section home-mood-section';
+        const tilesHtml = HOME_MOOD_PICKS.map((mood) => {
+            const m = PALMPLAY_MOODS[mood] || {};
+            return `<div class="genre-browse-card home-mood-tile" style="background:${m.grad || 'linear-gradient(135deg,#666,#333)'}" data-mood="${escapeHtml(mood)}">
+                <i class="fas ${m.icon || 'fa-music'} genre-card-icon"></i>
+                <span class="genre-card-label">${escapeHtml(mood)}</span>
+            </div>`;
+        }).join('');
+        section.innerHTML = `
+            <div class="home-section-head">
+                <div>
+                    <h3 class="home-section-title">Set the mood</h3>
+                    <p class="home-section-sub">One tap to a playlist</p>
+                </div>
+            </div>
+            <div class="genre-browse-grid home-mood-grid">${tilesHtml}</div>
+            <div class="card-grid home-mood-results" id="home-mood-results" style="display:none;"></div>
+        `;
+        parent.appendChild(section);
+
+        const resultsGrid = section.querySelector('#home-mood-results');
+        const loadMood = async (tile, mood) => {
+            section.querySelectorAll('.home-mood-tile').forEach((t) => t.classList.remove('home-mood-tile--active'));
+            tile.classList.add('home-mood-tile--active');
+            resultsGrid.style.display = 'grid';
+            resultsGrid.innerHTML = skeletonCardGrid(6);
+            resultsGrid.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            try {
+                const tracks = await fetchCatalogTracks(mood, 12);
+                if (state.currentView !== 'home') return;
+                if (!tracks.length) {
+                    resultsGrid.innerHTML = `<p style="grid-column:1/-1; color:var(--text-subdued); padding:20px;">No ${escapeHtml(mood)} tracks found.</p>`;
+                    return;
+                }
+                const plIndex = upsertTempPlaylist(`home_mood_${mood}`, `${mood} Mix`, tracks);
+                resultsGrid.innerHTML = '';
+                tracks.forEach((track, tIdx) => resultsGrid.appendChild(createTrackCard(track, plIndex, tIdx)));
+            } catch (e) {
+                showErrorState(resultsGrid, {
+                    icon: 'fa-cloud-download-alt',
+                    title: 'Could not load tracks',
+                    message: navigator.onLine ? 'Try again in a moment.' : 'You appear to be offline.',
+                    onRetry: () => loadMood(tile, mood)
+                });
+            }
+        };
+        section.querySelectorAll('.home-mood-tile').forEach((tile) => {
+            tile.addEventListener('click', () => loadMood(tile, tile.getAttribute('data-mood')));
+        });
     }
 
     function normalizeTitleKey(name) {
@@ -3621,19 +3668,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = document.createElement('div');
         row.className = 'home-quick-actions';
         const actions = [
-            { label: 'Discover', icon: 'fa-search', route: 'discover' },
-            { label: 'Explore', icon: 'fa-compass', route: 'explore' },
-            { label: 'Languages', icon: 'fa-globe', route: 'discover' }
+            { label: 'Explore all music', icon: 'fa-compass', onClick: () => ppRoutes().go('explore') },
+            { label: 'Your Library', icon: 'fa-layer-group', onClick: () => window.PalmPlayNav?.go('library') }
         ];
         actions.forEach((a) => {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'home-quick-chip';
             btn.innerHTML = `<i class="fas ${a.icon}"></i> ${escapeHtml(a.label)}`;
-            btn.onclick = () => {
-                if (a.route === 'explore') ppRoutes().go('explore');
-                else ppRoutes().go('discover');
-            };
+            btn.onclick = a.onClick;
             row.appendChild(btn);
         });
         const wrap = document.createElement('section');
@@ -3727,6 +3770,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!isLoggedIn) renderHomeLoginBanner(cardGrid);
 
+        if (history.length) {
+            renderTrackRow(cardGrid, 'Recently played', 'Jump back in', history, 'home_continue', { variant: 'continue' });
+        }
+
         if (options.forYouTracks?.length) {
             renderTrackRow(
                 cardGrid,
@@ -3734,19 +3781,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 'Based on your listens, likes, and feedback',
                 options.forYouTracks,
                 'home_for_you',
-                { cardOptions: { showFeedback: true } }
+                { variant: 'spotlight', cardOptions: { showFeedback: true } }
             );
         }
 
-        if (history.length) {
-            renderTrackRow(cardGrid, 'History', 'Recently played songs', history, 'home_continue');
-        }
+        renderHomeMoodTiles(cardGrid);
 
         renderTrackRow(cardGrid, 'Trending Songs', 'Popular on PalmPlay', feed.trending, 'home_trending');
         renderTrackRow(cardGrid, 'Top Artists', 'Discover new artists', feed.artists, 'home_artists');
         renderTrackRow(cardGrid, 'Top Albums', 'Binge listen', feed.albums, 'home_albums');
         renderTrackRow(cardGrid, 'All Music', 'More to explore', feed.allMusic, 'home_all');
-        renderTrackRow(cardGrid, 'Fresh picks', 'Curated for you', feed.picks, 'home_picks');
+        renderTrackRow(cardGrid, 'Fresh picks', 'Curated for you — refreshes daily', feed.picks, 'home_picks', { variant: 'spotlight' });
 
         renderHomeQuickActions(cardGrid);
 
@@ -3764,11 +3809,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const existing = cardGrid.querySelector('[data-home-section="for-you"]');
                 if (existing) return;
                 const section = document.createElement('section');
-                section.className = 'home-section';
+                section.className = 'home-section home-section--spotlight';
                 section.setAttribute('data-home-section', 'for-you');
                 section.innerHTML = `
                     <div class="home-section-head">
                         <div>
+                            <span class="home-section-badge"><i class="fas fa-star"></i> Made for you</span>
                             <h3 class="home-section-title">For you</h3>
                             <p class="home-section-sub">Based on your listens, likes, and feedback</p>
                         </div>
@@ -3781,8 +3827,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 organizedTracks.forEach((track, tIdx) => {
                     grid.appendChild(createTrackCard(track, plIndex, tIdx, { showFeedback: true }));
                 });
-                const banner = cardGrid.querySelector('.home-login-banner');
-                if (banner) banner.insertAdjacentElement('afterend', section);
+                const anchor = cardGrid.querySelector('.home-section--continue') || cardGrid.querySelector('.home-login-banner');
+                if (anchor) anchor.insertAdjacentElement('afterend', section);
                 else cardGrid.prepend(section);
             })
             .catch((e) => console.warn('For You generation failed', e));
@@ -3800,10 +3846,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isExplore = ppRoutes().isExplorePage();
 
         if (isExplore) {
-            window.renderExplore = renderExplore;
-            const activeChip = document.querySelector('.chip.active');
-            const genre = activeChip ? activeChip.getAttribute('data-genre') : 'Trending';
-            renderExplore(genre);
+            renderExplore();
             return;
         }
 
@@ -3813,8 +3856,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         greetingEl.className = 'greeting';
         greetingEl.textContent = isLoggedIn
-            ? `${getRandomWish()}, ${savedUser.name || 'Listener'}`
-            : 'Welcome to PalmPlay';
+            ? `Good ${getTimeGreeting()}, ${savedUser.name || 'Listener'}`
+            : `Good ${getTimeGreeting()}! Welcome to PalmPlay`;
         if (sectionTitleEl) sectionTitleEl.textContent = 'Listen now';
 
         // Pre-populate hero banner with the last played song — never show empty black
@@ -3877,61 +3920,293 @@ document.addEventListener('DOMContentLoaded', () => {
         loadHomeForYouRow(feed);
     }
 
-    async function renderExplore(category) {
+    // Unified Explore page: language-first browsing (primary), mood/genre chips
+    // (secondary), and a trending row — merges what used to be a separate flat
+    // "Explore" genre browser and a "Discover" search hub into one page.
+    async function renderExplore() {
         document.body.classList.remove('lang-view-active');
         state.currentView = 'explore';
-        setHeaderSearchVisible(false);
-        viewHeader.style.display = 'block';
-        greetingEl.style.display = 'block';
-        if (exploreHero) exploreHero.style.display = 'flex';
-        if (categoryChips) categoryChips.style.display = 'flex';
-        
-        const savedUser = getSavedUser();
-        greetingEl.textContent = `Explore the Treat to Your Ears, ${savedUser.name || 'Guest'}`;
-        sectionTitleEl.textContent = `${category} Tracks`;
+        setHeaderSearchVisible(true);
+        if (viewHeader) viewHeader.style.display = 'none';
+        if (exploreHero) exploreHero.style.display = 'none';
+        if (categoryChips) categoryChips.style.display = 'none';
+        greetingEl && (greetingEl.style.display = 'none');
         header.style.backgroundColor = 'transparent';
-        
-        cardGrid.innerHTML = `<div style="grid-column:1/-1">${skeletonCardGrid(8)}</div>`;
-        cardGrid.style.display = 'grid';
-        
-        try {
-            const query = category === 'Trending' ? 'latest hits' : category;
-            const catalogTracks = await fetchCatalogTracks(query, 20);
-            
-            cardGrid.innerHTML = '';
-            
-            if (catalogTracks.length === 0) {
-                cardGrid.innerHTML = '<div style="grid-column: 1/-1; color:var(--text-subdued); padding:20px;">No tracks found for this category.</div>';
-                return;
-            }
-            
-            // Create or update temporary playlist for playback
-            let explorePlIndex = playlists.findIndex(pl => pl.id === 'catalog_explore');
-            if (explorePlIndex === -1) {
-                explorePlIndex = playlists.length;
-                playlists.push({
-                    id: 'catalog_explore',
-                    name: 'Explore Mix',
-                    tracks: [],
-                    isTemporary: true
+        cardGrid.innerHTML = '';
+        cardGrid.className = 'card-grid';
+        cardGrid.style.display = 'block';
+
+        // Flatten local tracks for the "Your Library" section shown while searching
+        const allTracks = [];
+        playlists.forEach((pl, plIdx) => {
+            if (!pl.isTemporary) {
+                pl.tracks.forEach((t, tIdx) => {
+                    allTracks.push({ ...t, plIdx, tIdx });
                 });
             }
-            
-            playlists[explorePlIndex].tracks = catalogTracks;
-            
-            catalogTracks.forEach((track, tIdx) => {
-                cardGrid.appendChild(createTrackCard(track, explorePlIndex, tIdx));
+        });
+
+        const hub = document.createElement('div');
+        hub.className = 'search-discovery-hub';
+
+        const quickSearches = ['Lofi Beats', 'Hip Hop', 'Chill Vibes', 'Electronic', 'R&B Soul', 'Indie', 'Jazz', 'Ambient', 'Rock', 'Acoustic'];
+        const chipsHtml = quickSearches.map(q =>
+            `<button class="quick-chip" onclick="document.querySelector('.premium-search-input').value='${q}'; document.querySelector('.premium-search-input').dispatchEvent(new Event('input'));">
+                <i class="fas fa-search" style="margin-right:6px; font-size:10px; opacity:0.6"></i>${q}
+            </button>`
+        ).join('');
+
+        // Language browse cards — the primary way to explore PalmPlay's catalog
+        const languages = [
+            { name: 'Hindi',      script: 'हि', grad: 'linear-gradient(135deg, #F97316, #DC2626)',  moods: ['Romantic', 'Party', 'Chill', 'Devotional', 'Workout', 'Sad'] },
+            { name: 'Tamil',      script: 'த',  grad: 'linear-gradient(135deg, #8B5CF6, #6366F1)',  moods: ['Romantic', 'Kuthu', 'Melody', 'Devotional', 'Mass', 'Chill'] },
+            { name: 'Telugu',     script: 'తె', grad: 'linear-gradient(135deg, #EC4899, #BE185D)',  moods: ['Romantic', 'Party', 'Melody', 'Devotional', 'Mass', 'Chill'] },
+            { name: 'Kannada',    script: 'ಕ',  grad: 'linear-gradient(135deg, #10B981, #059669)',  moods: ['Romantic', 'Party', 'Melody', 'Devotional', 'Chill', 'Folk'] },
+            { name: 'Malayalam',  script: 'മ',  grad: 'linear-gradient(135deg, #06B6D4, #0284C7)',  moods: ['Romantic', 'Chill', 'Melody', 'Devotional', 'Folk', 'Party'] },
+            { name: 'Punjabi',    script: 'ਪੰ', grad: 'linear-gradient(135deg, #EAB308, #CA8A04)',  moods: ['Bhangra', 'Party', 'Romantic', 'Chill', 'Workout', 'Sad'] },
+            { name: 'English',    script: 'En', grad: 'linear-gradient(135deg, #3B82F6, #1D4ED8)',  moods: ['Pop', 'Hip-Hop', 'Rock', 'Chill', 'R&B', 'EDM'] },
+            { name: 'Korean',     script: '한', grad: 'linear-gradient(135deg, #E879F9, #A855F7)',  moods: ['K-Pop', 'Ballad', 'Hip-Hop', 'R&B', 'Chill', 'Dance'] },
+            { name: 'Spanish',    script: 'Es', grad: 'linear-gradient(135deg, #EF4444, #B91C1C)',  moods: ['Reggaeton', 'Latin Pop', 'Bachata', 'Chill', 'Party', 'Romantic'] },
+            { name: 'Arabic',     script: 'عر', grad: 'linear-gradient(135deg, #D97706, #92400E)',  moods: ['Pop', 'Classic', 'Chill', 'Romantic', 'Party', 'Folk'] },
+        ];
+        window._palmplayLanguages = languages; // expose for renderLanguagePage
+
+        const langCards = languages.map((l, idx) =>
+            `<div class="genre-browse-card" style="background: ${l.grad}" onclick="window._openLanguagePage(${idx})">
+                <span class="lang-script-char">${l.script}</span>
+                <span class="genre-card-label">${l.name}</span>
+            </div>`
+        ).join('');
+
+        // Secondary mood/genre filter — one chip row, results load into their own grid
+        const exploreCategories = ['Trending', 'Pop', 'Hip-Hop', 'Chill', 'Workout', 'Focus', 'Party'];
+        const categoryChipsHtml = exploreCategories.map((c, i) =>
+            `<button type="button" class="chip explore-chip${i === 0 ? ' active' : ''}" data-genre="${escapeHtml(c)}">${escapeHtml(c)}</button>`
+        ).join('');
+
+        hub.innerHTML = `
+            <div class="search-hero-section">
+                <div class="search-hero-visual">
+                    <canvas id="search-visualizer" width="600" height="200"></canvas>
+                </div>
+                <div class="search-hero-text">
+                    <h2>Explore Something New</h2>
+                    <p>Search across millions of songs — browse by language, mood, and genre</p>
+                </div>
+            </div>
+
+            <div class="quick-chips-row">
+                <span style="color:var(--text-subdued); font-size:13px; margin-right:8px; white-space:nowrap;">Try:</span>
+                ${chipsHtml}
+            </div>
+
+            ${renderRecentSearchesHtml()}
+
+            <h3 class="browse-section-title"><i class="fas fa-globe" style="color:var(--primary); margin-right:8px;"></i>Browse by Language</h3>
+            <div class="genre-browse-grid">
+                ${langCards}
+            </div>
+
+            <h3 class="browse-section-title" style="margin-top:24px;"><i class="fas fa-music" style="color:var(--primary); margin-right:8px;"></i>Browse by Mood &amp; Genre</h3>
+            <div class="category-chips explore-category-chips">
+                ${categoryChipsHtml}
+            </div>
+            <div class="card-grid explore-genre-grid" id="explore-genre-grid" style="display:grid;">
+                ${skeletonCardGrid(8)}
+            </div>
+
+            <h3 class="browse-section-title" style="margin-top:32px;">
+                <i class="fas fa-fire" style="color:var(--primary); margin-right:8px;"></i>Trending Right Now
+            </h3>
+            <div class="card-grid trending-grid" id="search-trending-grid" style="display:grid;">
+                ${skeletonCardGrid(6)}
+            </div>
+        `;
+        cardGrid.appendChild(hub);
+        bindRecentSearchChips(hub);
+
+        // ─── Mood/Genre chip browsing (secondary filter) ───────────────────────
+        const loadExploreCategory = async (genre) => {
+            const grid = document.getElementById('explore-genre-grid');
+            if (!grid) return;
+            grid.innerHTML = skeletonCardGrid(8);
+            try {
+                const query = genre === 'Trending' ? 'latest hits' : genre;
+                const tracks = await fetchCatalogTracks(query, 20);
+                if (state.currentView !== 'explore') return;
+                if (tracks.length === 0) {
+                    grid.innerHTML = '<p style="grid-column:1/-1; color:var(--text-subdued); padding:20px;">No tracks found for this category.</p>';
+                    return;
+                }
+                let plIndex = playlists.findIndex(pl => pl.id === 'catalog_explore');
+                if (plIndex === -1) {
+                    plIndex = playlists.length;
+                    playlists.push({ id: 'catalog_explore', name: 'Explore Mix', tracks: [], isTemporary: true });
+                }
+                playlists[plIndex].tracks = tracks;
+                grid.innerHTML = '';
+                tracks.forEach((track, tIdx) => grid.appendChild(createTrackCard(track, plIndex, tIdx)));
+            } catch (err) {
+                console.error('Explore API Error:', err);
+                showErrorState(grid, {
+                    icon: 'fa-cloud-download-alt',
+                    title: 'Could not load tracks',
+                    message: navigator.onLine ? 'The service may be busy. Try again or pick another category.' : 'You appear to be offline.',
+                    onRetry: () => loadExploreCategory(genre)
+                });
+            }
+        };
+        hub.querySelectorAll('.explore-chip').forEach((chip) => {
+            chip.addEventListener('click', () => {
+                hub.querySelectorAll('.explore-chip').forEach((c) => c.classList.remove('active'));
+                chip.classList.add('active');
+                loadExploreCategory(chip.getAttribute('data-genre') || 'Trending');
             });
-            
-        } catch (err) {
-            console.error("Explore API Error:", err);
-            showErrorState(cardGrid, {
-                icon: 'fa-cloud-download-alt',
-                title: 'Could not load tracks',
-                message: navigator.onLine ? 'The service may be busy. Try again or pick another category.' : 'You appear to be offline.',
-                onRetry: () => document.querySelector('.chip.active')?.click()
+        });
+        loadExploreCategory('Trending');
+
+        // Local tracks below (hidden by default, shown while searching)
+        const localSection = document.createElement('div');
+        localSection.id = 'local-search-results';
+        localSection.style.display = 'none';
+        localSection.innerHTML = '<h3 class="browse-section-title">Your Library</h3>';
+        const localGrid = document.createElement('div');
+        localGrid.className = 'card-grid';
+        localGrid.style.display = 'grid';
+        allTracks.forEach(track => {
+            const card = document.createElement('div');
+            card.className = 'card local-card';
+            card.innerHTML = `
+                <div class="card-image" style="background-image: url(${track.art})">
+                    <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
+                </div>
+                <div class="card-title">${track.name}</div>
+                <div class="card-desc">${track.artist}</div>
+            `;
+            card.onclick = () => playTrack(track.plIdx, track.tIdx);
+            attachCardActions(card, track, track.plIdx, track.tIdx);
+            localGrid.appendChild(card);
+        });
+        localSection.appendChild(localGrid);
+        cardGrid.appendChild(localSection);
+
+        // Add container for catalog search results
+        const catalogContainer = document.createElement('div');
+        catalogContainer.id = 'catalog-results';
+        catalogContainer.style.marginTop = '20px';
+        catalogContainer.innerHTML = '<h3 class="browse-section-title" style="color:var(--primary);">Search Results</h3><div class="card-grid" id="catalog-card-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px;"></div>';
+        catalogContainer.style.display = 'none';
+        cardGrid.appendChild(catalogContainer);
+
+        // ─── Interactive Visualizer Canvas ──────────────────────────────────────
+        const canvas = document.getElementById('search-visualizer');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            const particles = [];
+            const PARTICLE_COUNT = 60;
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                particles.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    radius: Math.random() * 3 + 1,
+                    speedX: (Math.random() - 0.5) * 0.8,
+                    speedY: (Math.random() - 0.5) * 0.8,
+                    opacity: Math.random() * 0.5 + 0.2,
+                    hue: Math.random() * 40 - 10 // red-ish range
+                });
+            }
+
+            let animFrame;
+            function drawVisualizer() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                // Draw connecting lines between nearby particles
+                for (let i = 0; i < particles.length; i++) {
+                    for (let j = i + 1; j < particles.length; j++) {
+                        const dx = particles[i].x - particles[j].x;
+                        const dy = particles[i].y - particles[j].y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < 100) {
+                            ctx.beginPath();
+                            ctx.strokeStyle = `rgba(255, 60, 60, ${0.15 * (1 - dist / 100)})`;
+                            ctx.lineWidth = 0.5;
+                            ctx.moveTo(particles[i].x, particles[i].y);
+                            ctx.lineTo(particles[j].x, particles[j].y);
+                            ctx.stroke();
+                        }
+                    }
+                }
+
+                // Draw and move particles
+                particles.forEach(p => {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsla(${p.hue}, 80%, 60%, ${p.opacity})`;
+                    ctx.fill();
+
+                    p.x += p.speedX;
+                    p.y += p.speedY;
+
+                    // Bounce off edges
+                    if (p.x < 0 || p.x > canvas.width) p.speedX *= -1;
+                    if (p.y < 0 || p.y > canvas.height) p.speedY *= -1;
+                });
+
+                animFrame = requestAnimationFrame(drawVisualizer);
+            }
+            drawVisualizer();
+
+            // Clean up when leaving Explore
+            const observer = new MutationObserver(() => {
+                if (!document.getElementById('search-visualizer')) {
+                    cancelAnimationFrame(animFrame);
+                    observer.disconnect();
+                }
             });
+            observer.observe(cardGrid, { childList: true });
         }
+
+        // ─── Auto-load Trending Tracks ──────────────────────────────────────────
+        const loadTrending = async () => {
+            const trendGrid = document.getElementById('search-trending-grid');
+            if (!trendGrid) return;
+            try {
+                const tracks = await fetchCatalogTracks("Latest Hits", 12);
+
+                if (tracks.length === 0) {
+                    showErrorState(trendGrid, {
+                        icon: 'fa-fire',
+                        title: 'Could not load trending',
+                        message: 'Try again in a moment.',
+                        onRetry: loadTrending
+                    });
+                    return;
+                }
+
+                let trendPlIndex = playlists.findIndex(pl => pl.id === 'catalog_trending_search');
+                if (trendPlIndex === -1) {
+                    trendPlIndex = playlists.length;
+                    playlists.push({ id: 'catalog_trending_search', name: 'Trending', tracks: [], isTemporary: true });
+                }
+
+                playlists[trendPlIndex].tracks = tracks;
+
+                trendGrid.innerHTML = '';
+                tracks.forEach((track, tIdx) => {
+                    trendGrid.appendChild(createTrackCard(track, trendPlIndex, tIdx));
+                });
+            } catch (e) {
+                showErrorState(trendGrid, {
+                    icon: 'fa-fire',
+                    title: 'Could not load trending',
+                    message: navigator.onLine ? 'Try again in a moment.' : 'You appear to be offline.',
+                    onRetry: loadTrending
+                });
+            }
+        };
+        loadTrending();
+        // ────────────────────────────────────────────────────────────────────────
     }
 
     function showPlaylist(plIndex) {
@@ -4687,245 +4962,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let catalogSearchTimeout = null;
 
-    function renderSearch() {
-        document.body.classList.remove('lang-view-active');
-        setHeaderSearchVisible(true);
-        greetingEl.style.display = 'none';
-        if (exploreHero) exploreHero.style.display = 'none';
-        if (categoryChips) categoryChips.style.display = 'none';
-        sectionTitleEl.textContent = 'Browse All Tracks';
-        cardGrid.innerHTML = '';
-        cardGrid.style.display = 'block';
-
-        // Flatten all tracks for search, maintaining original playlist indexes
-        const allTracks = [];
-        playlists.forEach((pl, plIdx) => {
-            if (!pl.isTemporary) {
-                pl.tracks.forEach((t, tIdx) => {
-                    allTracks.push({ ...t, plIdx, tIdx });
-                });
-            }
-        });
-
-        // ─── Interactive Discovery Hub ─────────────────────────────────────────
-        const hub = document.createElement('div');
-        hub.className = 'search-discovery-hub';
-
-        // Quick search suggestion chips
-        const quickSearches = ['Lofi Beats', 'Hip Hop', 'Chill Vibes', 'Electronic', 'R&B Soul', 'Indie', 'Jazz', 'Ambient', 'Rock', 'Acoustic'];
-        const chipsHtml = quickSearches.map(q =>
-            `<button class="quick-chip" onclick="document.querySelector('.premium-search-input').value='${q}'; document.querySelector('.premium-search-input').dispatchEvent(new Event('input'));">
-                <i class="fas fa-search" style="margin-right:6px; font-size:10px; opacity:0.6"></i>${q}
-            </button>`
-        ).join('');
-
-        // Language browse cards with unique gradients and native script
-        const languages = [
-            { name: 'Hindi',      script: 'हि', grad: 'linear-gradient(135deg, #F97316, #DC2626)',  moods: ['Romantic', 'Party', 'Chill', 'Devotional', 'Workout', 'Sad'] },
-            { name: 'Tamil',      script: 'த',  grad: 'linear-gradient(135deg, #8B5CF6, #6366F1)',  moods: ['Romantic', 'Kuthu', 'Melody', 'Devotional', 'Mass', 'Chill'] },
-            { name: 'Telugu',     script: 'తె', grad: 'linear-gradient(135deg, #EC4899, #BE185D)',  moods: ['Romantic', 'Party', 'Melody', 'Devotional', 'Mass', 'Chill'] },
-            { name: 'Kannada',    script: 'ಕ',  grad: 'linear-gradient(135deg, #10B981, #059669)',  moods: ['Romantic', 'Party', 'Melody', 'Devotional', 'Chill', 'Folk'] },
-            { name: 'Malayalam',  script: 'മ',  grad: 'linear-gradient(135deg, #06B6D4, #0284C7)',  moods: ['Romantic', 'Chill', 'Melody', 'Devotional', 'Folk', 'Party'] },
-            { name: 'Punjabi',    script: 'ਪੰ', grad: 'linear-gradient(135deg, #EAB308, #CA8A04)',  moods: ['Bhangra', 'Party', 'Romantic', 'Chill', 'Workout', 'Sad'] },
-            { name: 'English',    script: 'En', grad: 'linear-gradient(135deg, #3B82F6, #1D4ED8)',  moods: ['Pop', 'Hip-Hop', 'Rock', 'Chill', 'R&B', 'EDM'] },
-            { name: 'Korean',     script: '한', grad: 'linear-gradient(135deg, #E879F9, #A855F7)',  moods: ['K-Pop', 'Ballad', 'Hip-Hop', 'R&B', 'Chill', 'Dance'] },
-            { name: 'Spanish',    script: 'Es', grad: 'linear-gradient(135deg, #EF4444, #B91C1C)',  moods: ['Reggaeton', 'Latin Pop', 'Bachata', 'Chill', 'Party', 'Romantic'] },
-            { name: 'Arabic',     script: 'عر', grad: 'linear-gradient(135deg, #D97706, #92400E)',  moods: ['Pop', 'Classic', 'Chill', 'Romantic', 'Party', 'Folk'] },
-        ];
-        window._palmplayLanguages = languages; // expose for renderLanguagePage
-
-        const langCards = languages.map((l, idx) =>
-            `<div class="genre-browse-card" style="background: ${l.grad}" onclick="window._openLanguagePage(${idx})">
-                <span class="lang-script-char">${l.script}</span>
-                <span class="genre-card-label">${l.name}</span>
-            </div>`
-        ).join('');
-
-        // Genre browse cards (secondary row)
-        const genres = [
-            { name: 'Electronic', icon: 'fa-bolt',       grad: 'linear-gradient(135deg, #7C3AED, #4C1D95)' },
-            { name: 'Hip-Hop',    icon: 'fa-microphone', grad: 'linear-gradient(135deg, #F97316, #EF4444)' },
-            { name: 'Lo-Fi',      icon: 'fa-cloud-moon', grad: 'linear-gradient(135deg, #06B6D4, #3B82F6)' },
-            { name: 'Rock',       icon: 'fa-fire',       grad: 'linear-gradient(135deg, #DC2626, #991B1B)' },
-        ];
-        const genreCards = genres.map(g =>
-            `<div class="genre-browse-card" style="background: ${g.grad}" onclick="document.querySelector('.premium-search-input').value='${g.name}'; document.querySelector('.premium-search-input').dispatchEvent(new Event('input'));">
-                <i class="fas ${g.icon} genre-card-icon"></i>
-                <span class="genre-card-label">${g.name}</span>
-            </div>`
-        ).join('');
-
-        hub.innerHTML = `
-            <div class="search-hero-section">
-                <div class="search-hero-visual">
-                    <canvas id="search-visualizer" width="600" height="200"></canvas>
-                </div>
-                <div class="search-hero-text">
-                    <h2>Discover Something New</h2>
-                    <p>Search across millions of songs — browse by language, mood, and genre</p>
-                </div>
-            </div>
-
-            <div class="quick-chips-row">
-                <span style="color:var(--text-subdued); font-size:13px; margin-right:8px; white-space:nowrap;">Try:</span>
-                ${chipsHtml}
-            </div>
-
-            ${renderRecentSearchesHtml()}
-
-            <h3 class="browse-section-title"><i class="fas fa-globe" style="color:var(--primary); margin-right:8px;"></i>Browse by Language</h3>
-            <div class="genre-browse-grid">
-                ${langCards}
-            </div>
-
-            <h3 class="browse-section-title" style="margin-top:24px;"><i class="fas fa-music" style="color:var(--primary); margin-right:8px;"></i>Browse by Genre</h3>
-            <div class="genre-browse-grid">
-                ${genreCards}
-            </div>
-
-            <h3 class="browse-section-title" style="margin-top:32px;">
-                <i class="fas fa-fire" style="color:var(--primary); margin-right:8px;"></i>Trending Right Now
-            </h3>
-            <div class="card-grid trending-grid" id="search-trending-grid" style="display:grid;">
-                ${skeletonCardGrid(6)}
-            </div>
-        `;
-        cardGrid.appendChild(hub);
-        bindRecentSearchChips(hub);
-
-        // Local tracks below (hidden by default, shown on search)
-        const localSection = document.createElement('div');
-        localSection.id = 'local-search-results';
-        localSection.style.display = 'none';
-        localSection.innerHTML = '<h3 class="browse-section-title">Your Library</h3>';
-        const localGrid = document.createElement('div');
-        localGrid.className = 'card-grid';
-        localGrid.style.display = 'grid';
-        allTracks.forEach(track => {
-            const card = document.createElement('div');
-            card.className = 'card local-card';
-            card.innerHTML = `
-                <div class="card-image" style="background-image: url(${track.art})">
-                    <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
-                </div>
-                <div class="card-title">${track.name}</div>
-                <div class="card-desc">${track.artist}</div>
-            `;
-            card.onclick = () => playTrack(track.plIdx, track.tIdx);
-            attachCardActions(card, track, track.plIdx, track.tIdx);
-            localGrid.appendChild(card);
-        });
-        localSection.appendChild(localGrid);
-        cardGrid.appendChild(localSection);
-
-        // Add container for catalog search results
-        const catalogContainer = document.createElement('div');
-        catalogContainer.id = 'catalog-results';
-        catalogContainer.style.marginTop = '20px';
-        catalogContainer.innerHTML = '<h3 class="browse-section-title" style="color:var(--primary);">Search Results</h3><div class="card-grid" id="catalog-card-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 24px;"></div>';
-        catalogContainer.style.display = 'none';
-        cardGrid.appendChild(catalogContainer);
-
-        // ─── Interactive Visualizer Canvas ──────────────────────────────────────
-        const canvas = document.getElementById('search-visualizer');
-        if (canvas) {
-            const ctx = canvas.getContext('2d');
-            const particles = [];
-            const PARTICLE_COUNT = 60;
-
-            for (let i = 0; i < PARTICLE_COUNT; i++) {
-                particles.push({
-                    x: Math.random() * canvas.width,
-                    y: Math.random() * canvas.height,
-                    radius: Math.random() * 3 + 1,
-                    speedX: (Math.random() - 0.5) * 0.8,
-                    speedY: (Math.random() - 0.5) * 0.8,
-                    opacity: Math.random() * 0.5 + 0.2,
-                    hue: Math.random() * 40 - 10 // red-ish range
-                });
-            }
-
-            let animFrame;
-            function drawVisualizer() {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                // Draw connecting lines between nearby particles
-                for (let i = 0; i < particles.length; i++) {
-                    for (let j = i + 1; j < particles.length; j++) {
-                        const dx = particles[i].x - particles[j].x;
-                        const dy = particles[i].y - particles[j].y;
-                        const dist = Math.sqrt(dx * dx + dy * dy);
-                        if (dist < 100) {
-                            ctx.beginPath();
-                            ctx.strokeStyle = `rgba(255, 60, 60, ${0.15 * (1 - dist / 100)})`;
-                            ctx.lineWidth = 0.5;
-                            ctx.moveTo(particles[i].x, particles[i].y);
-                            ctx.lineTo(particles[j].x, particles[j].y);
-                            ctx.stroke();
-                        }
-                    }
-                }
-
-                // Draw and move particles
-                particles.forEach(p => {
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-                    ctx.fillStyle = `hsla(${p.hue}, 80%, 60%, ${p.opacity})`;
-                    ctx.fill();
-
-                    p.x += p.speedX;
-                    p.y += p.speedY;
-
-                    // Bounce off edges
-                    if (p.x < 0 || p.x > canvas.width) p.speedX *= -1;
-                    if (p.y < 0 || p.y > canvas.height) p.speedY *= -1;
-                });
-
-                animFrame = requestAnimationFrame(drawVisualizer);
-            }
-            drawVisualizer();
-
-            // Clean up when leaving search view
-            const observer = new MutationObserver(() => {
-                if (!document.getElementById('search-visualizer')) {
-                    cancelAnimationFrame(animFrame);
-                    observer.disconnect();
-                }
-            });
-            observer.observe(cardGrid, { childList: true });
-        }
-
-        // ─── Auto-load Trending Tracks ──────────────────────────────────────────
-        (async () => {
-            const trendGrid = document.getElementById('search-trending-grid');
-            if (!trendGrid) return;
-            try {
-                const tracks = await fetchCatalogTracks("Latest Hits", 12);
-
-                if (tracks.length === 0) {
-                    trendGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Could not load trending.</p>';
-                    return;
-                }
-
-                let trendPlIndex = playlists.findIndex(pl => pl.id === 'catalog_trending_search');
-                if (trendPlIndex === -1) {
-                    trendPlIndex = playlists.length;
-                    playlists.push({ id: 'catalog_trending_search', name: 'Trending', tracks: [], isTemporary: true });
-                }
-
-                playlists[trendPlIndex].tracks = tracks;
-
-                trendGrid.innerHTML = '';
-                tracks.forEach((track, tIdx) => {
-                    trendGrid.appendChild(createTrackCard(track, trendPlIndex, tIdx));
-                });
-            } catch(e) {
-                trendGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">Couldn\'t load trending tracks.</p>';
-            }
-        })();
-        // ────────────────────────────────────────────────────────────────────────
-    }
-
     // ─── Language Landing Page ─────────────────────────────────────────────────
     window._openLanguagePage = function(langIdx) {
         const lang = window._palmplayLanguages[langIdx];
@@ -4942,21 +4978,11 @@ document.addEventListener('DOMContentLoaded', () => {
         cardGrid.style.display = 'block';
         cardGrid.innerHTML = '';
 
-        const moodIcons = {
-            'Romantic': 'fa-heart', 'Party': 'fa-glass-cheers', 'Chill': 'fa-cloud-moon',
-            'Devotional': 'fa-pray', 'Workout': 'fa-dumbbell', 'Sad': 'fa-cloud-rain',
-            'Kuthu': 'fa-drum', 'Melody': 'fa-music', 'Mass': 'fa-bolt', 'Folk': 'fa-leaf',
-            'Bhangra': 'fa-drum', 'Pop': 'fa-star', 'Hip-Hop': 'fa-microphone',
-            'Rock': 'fa-guitar', 'R&B': 'fa-heart', 'EDM': 'fa-bolt',
-            'K-Pop': 'fa-star', 'Ballad': 'fa-feather', 'Dance': 'fa-shoe-prints',
-            'Reggaeton': 'fa-fire', 'Latin Pop': 'fa-sun', 'Bachata': 'fa-heart',
-            'Classic': 'fa-landmark', 'Focus': 'fa-brain'
-        };
-
-        // Build mood chips
+        // Build mood chips (icons come from the shared PALMPLAY_MOODS taxonomy —
+        // also used by the Home mood-tiles row — so both surfaces stay in sync)
         const moodChips = lang.moods.map((mood, i) =>
             `<button class="lang-mood-chip ${i === 0 ? 'active' : ''}" data-mood="${mood}" data-lang="${lang.name}">
-                <i class="fas ${moodIcons[mood] || 'fa-music'}"></i> ${mood}
+                <i class="fas ${PALMPLAY_MOODS[mood]?.icon || 'fa-music'}"></i> ${mood}
             </button>`
         ).join('');
 
@@ -4964,7 +4990,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const moodRows = lang.moods.map(mood =>
             `<div class="lang-mood-section" id="mood-${mood.replace(/[^a-zA-Z]/g, '')}">
                 <h3 class="browse-section-title">
-                    <i class="fas ${moodIcons[mood] || 'fa-music'}" style="color:var(--primary); margin-right:8px;"></i>${lang.name} ${mood}
+                    <i class="fas ${PALMPLAY_MOODS[mood]?.icon || 'fa-music'}" style="color:var(--primary); margin-right:8px;"></i>${lang.name} ${mood}
                 </h3>
                 <div class="lang-mood-scroll" id="mood-grid-${mood.replace(/[^a-zA-Z]/g, '')}">
                     ${skeletonCardGrid(4)}
@@ -5168,7 +5194,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 lang.moods.forEach((mood) => {
                     const safeId = mood.replace(/[^a-zA-Z]/g, '');
                     const grid = document.getElementById(`mood-grid-${safeId}`);
-                    if (grid) grid.innerHTML = '<p class="mood-empty">Failed to load.</p>';
+                    if (!grid) return;
+                    showErrorState(grid, {
+                        icon: 'fa-cloud-download-alt',
+                        title: 'Could not load tracks',
+                        message: navigator.onLine ? 'The service may be busy. Try again.' : 'You appear to be offline.',
+                        onRetry: () => renderLanguagePage(lang)
+                    });
                 });
             });
     }
@@ -5177,7 +5209,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function filterCards(query) {
         const lowQuery = query.toLowerCase();
 
-        if (state.currentView === 'search') {
+        if (state.currentView === 'explore') {
             const hub = cardGrid.querySelector('.search-discovery-hub');
             const localSection = document.getElementById('local-search-results');
 
