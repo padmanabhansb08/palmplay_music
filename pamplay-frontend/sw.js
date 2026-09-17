@@ -1,23 +1,17 @@
 /* PalmPlay service worker — offline app shell (streaming stays network-only) */
-const CACHE_NAME = 'palmplay-shell-v8';
+const CACHE_NAME = 'palmplay-shell-v9';
 
+// Keep this to the minimal app shell only. The fetch handler below already
+// caches every same-origin GET at runtime, so eagerly precaching the JS
+// bundle here just double-fetches it on every first visit / SW update for
+// no offline benefit (the runtime cache already has it after one page load).
 const PRECACHE = [
     './home.html',
     './explore.html',
     './style.css',
     './palmplay-ux.css',
-    './lib/routes.js',
-    './lib/pwa.js',
     './manifest.webmanifest',
-    './assets/gallery/p1.png',
-    './app.js',
-    './palmplay-ux.js',
-    './lib/palmplay-sync.js',
-    './lib/palmplay-auth.js',
-    './lib/curated-trending.js',
-    './env-config.js',
-    './catalog-config.js',
-    './supabase-config.js'
+    './assets/gallery/p1.png'
 ];
 
 function isAudioOrApi(url) {

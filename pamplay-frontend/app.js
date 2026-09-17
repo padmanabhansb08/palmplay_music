@@ -2683,38 +2683,49 @@ document.addEventListener('DOMContentLoaded', () => {
         const list = (window.PALMPLAY_CURATED_TRENDING || []).slice(0, limit);
         if (!list.length) return [];
 
-        const resolved = await Promise.all(
-            list.map(async (item) => {
-                const q = `${item.name} ${item.artist}`;
-                try {
-                    let tracks = await fetchCatalogTracks(q, 4); // reduced count for speed
-                    let picked = pickCuratedMatch(tracks, item);
-                    if (!picked || picked.score < 0.62) {
-                        const retryTracks = await fetchCatalogTracks(item.name, 4);
-                        const retryPicked = pickCuratedMatch(retryTracks, item);
-                        if (retryPicked && (!picked || retryPicked.score > picked.score)) {
-                            picked = retryPicked;
-                        }
+        const resolveOne = async (item) => {
+            const q = `${item.name} ${item.artist}`;
+            try {
+                // Full result width so pickCuratedMatch has enough candidates to find
+                // a confident match — trimming this to save time instead trades away
+                // match quality and pushes tracks into the generic-art fallback below.
+                let tracks = await fetchCatalogTracks(q, 8);
+                let picked = pickCuratedMatch(tracks, item);
+                if (!picked || picked.score < 0.62) {
+                    const retryTracks = await fetchCatalogTracks(item.name, 8);
+                    const retryPicked = pickCuratedMatch(retryTracks, item);
+                    if (retryPicked && (!picked || retryPicked.score > picked.score)) {
+                        picked = retryPicked;
                     }
-                    const match = picked?.track;
-                    if (!match?.url) return null;
-                    const confidentArt = (picked?.score || 0) >= 0.7;
-                    return {
-                        ...match,
-                        name: item.name,
-                        artist: item.artist,
-                        art: confidentArt ? (match.art || DEFAULT_ART_URL) : DEFAULT_ART_URL
-                    };
-                } catch (e) {
-                    console.warn('Curated track resolve failed:', q, e);
-                    return null;
                 }
-            })
-        );
-        const validResolved = resolved.filter(Boolean);
-        const finalTracks = validResolved.length ? validResolved : [];
-        if (finalTracks?.length) setCachedCuratedTracks(finalTracks);
-        return finalTracks;
+                const match = picked?.track;
+                if (!match?.url) return null;
+                const confidentArt = (picked?.score || 0) >= 0.7;
+                return {
+                    ...match,
+                    name: item.name,
+                    artist: item.artist,
+                    art: confidentArt ? (match.art || DEFAULT_ART_URL) : DEFAULT_ART_URL
+                };
+            } catch (e) {
+                console.warn('Curated track resolve failed:', q, e);
+                return null;
+            }
+        };
+
+        // Resolve in small concurrent batches rather than all at once: the catalog
+        // API is a single self-hosted proxy, and firing 20+ simultaneous lookups
+        // trips its rate limiting, causing more retries/backoff than it saves.
+        const BATCH_SIZE = 8;
+        const resolved = [];
+        for (let i = 0; i < list.length; i += BATCH_SIZE) {
+            const batch = list.slice(i, i + BATCH_SIZE);
+            const chunk = await Promise.all(batch.map(resolveOne));
+            resolved.push(...chunk.filter(Boolean));
+        }
+
+        if (resolved.length) setCachedCuratedTracks(resolved);
+        return resolved;
     }
 
     function readHomeFeedCache() {
@@ -3977,8 +3988,12 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`
         ).join('');
 
-        // Secondary mood/genre filter — one chip row, results load into their own grid
-        const exploreCategories = ['Trending', ...Object.keys(PALMPLAY_MOODS).sort()];
+        // Secondary mood/genre filter — one chip row, results load into their own grid.
+        // Deliberately curated + popularity-ordered rather than every PALMPLAY_MOODS
+        // key alphabetically: 24 chips (Bachata/Ballad/Bhangra/Classic... before Pop
+        // or Party) buries what people actually tap. Language-specific moods are
+        // already reachable one level down via the language tiles above.
+        const exploreCategories = ['Trending', 'Pop', 'Hip-Hop', 'Chill', 'Romantic', 'Workout', 'Party', 'Devotional'];
         const categoryChipsHtml = exploreCategories.map((c, i) =>
             `<button type="button" class="chip explore-chip${i === 0 ? ' active' : ''}" data-genre="${escapeHtml(c)}">${escapeHtml(c)}</button>`
         ).join('');
@@ -4102,7 +4117,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (canvas) {
             const ctx = canvas.getContext('2d');
             const particles = [];
-            const PARTICLE_COUNT = 60;
+            // Lower than the original 60: the connecting-line pass below is O(n^2),
+            // so this cuts per-frame work roughly 4-5x for a mostly-decorative effect.
+            const PARTICLE_COUNT = 28;
 
             for (let i = 0; i < PARTICLE_COUNT; i++) {
                 particles.push({
@@ -4117,7 +4134,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             let animFrame;
+            // The hero (and this canvas) is often scrolled out of view while
+            // browsing language/mood tiles further down the page — skip the
+            // draw entirely while that's true instead of paying for it off-screen.
+            let isVisible = true;
             function drawVisualizer() {
+                if (!isVisible) {
+                    animFrame = requestAnimationFrame(drawVisualizer);
+                    return;
+                }
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
 
                 // Draw connecting lines between nearby particles
@@ -4156,10 +4181,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             drawVisualizer();
 
-            // Clean up when leaving Explore
+            const intersectionObserver = new IntersectionObserver((entries) => {
+                isVisible = entries[0]?.isIntersecting ?? true;
+            }, { threshold: 0 });
+            intersectionObserver.observe(canvas);
+
+            // Clean up when leaving Explore (or when this hub gets re-rendered)
             const observer = new MutationObserver(() => {
                 if (!document.getElementById('search-visualizer')) {
                     cancelAnimationFrame(animFrame);
+                    intersectionObserver.disconnect();
                     observer.disconnect();
                 }
             });
@@ -5601,10 +5632,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // If the user navigated from another page (home ↔ explore), restore the
     // audio stream and player UI so music never stops between pages.
     (function restorePlaybackAfterNav() {
+        // Tab-scoped on purpose (matches lib/routes.js's savePlaybackState, which
+        // writes here): sessionStorage so two tabs of the same origin can't race
+        // each other's "just navigated" flag the way a shared localStorage key would.
         const PLAYBACK_KEY = 'pp_playback_state';
         let saved;
         try {
-            const raw = localStorage.getItem(PLAYBACK_KEY);
+            const raw = sessionStorage.getItem(PLAYBACK_KEY);
             saved = raw ? JSON.parse(raw) : null;
         } catch (e) { saved = null; }
 
@@ -5612,12 +5646,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Only restore if saved within the last 30 seconds (i.e. just navigated)
         if (Date.now() - saved.savedAt > 30000) {
-            localStorage.removeItem(PLAYBACK_KEY);
+            sessionStorage.removeItem(PLAYBACK_KEY);
             return;
         }
 
         // Clear so it doesn't restore again on next load
-        localStorage.removeItem(PLAYBACK_KEY);
+        sessionStorage.removeItem(PLAYBACK_KEY);
 
         // Restore player bar UI immediately (no async needed)
         if (trackNameEl) trackNameEl.textContent = saved.trackName;

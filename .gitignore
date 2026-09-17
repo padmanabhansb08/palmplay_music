@@ -7,3 +7,4 @@ pamplay-frontend/catalog-config.js
 pamplay-frontend/supabase-config.js
 *.log
 .vercel
+dist/

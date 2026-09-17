@@ -147,10 +147,12 @@
             const close = () => {
                 sidebar?.classList.remove('open');
                 overlay?.classList.remove('visible');
+                toggle.setAttribute('aria-label', 'Open menu');
             };
             toggle.onclick = () => {
-                sidebar?.classList.toggle('open');
-                overlay?.classList.toggle('visible', sidebar?.classList.contains('open'));
+                const isOpen = sidebar?.classList.toggle('open');
+                overlay?.classList.toggle('visible', isOpen);
+                toggle.setAttribute('aria-label', isOpen ? 'Close menu' : 'Open menu');
             };
             overlay?.addEventListener('click', close);
         },
