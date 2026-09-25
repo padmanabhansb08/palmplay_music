@@ -572,59 +572,6 @@ body.lang-view-active .top-header .search-container.premium-search {
     margin-bottom: 24px;
 }
 
-/* Hero Section (Explore Page) */
-.hero-section {
-    background: radial-gradient(circle at 80% 20%, rgba(255, 0, 0, 0.15), transparent 50%),
-        linear-gradient(135deg, rgba(30, 30, 30, 0.8) 0%, rgba(10, 10, 10, 0.8) 100%);
-    border-radius: var(--border-radius-lg);
-    padding: 60px;
-    margin-bottom: 40px;
-    border: 1px solid var(--glass-border);
-    position: relative;
-    overflow: hidden;
-}
-
-.hero-content {
-    position: relative;
-    z-index: 2;
-    max-width: 600px;
-}
-
-.hero-badge {
-    text-transform: uppercase;
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 2px;
-    color: var(--primary);
-    margin-bottom: 16px;
-    display: block;
-}
-
-.hero-title {
-    font-size: 56px;
-    font-weight: 800;
-    line-height: 1.1;
-    margin-bottom: 24px;
-    letter-spacing: -2px;
-}
-
-.hero-subtitle {
-    font-size: 18px;
-    color: var(--text-subdued);
-    margin-bottom: 32px;
-    line-height: 1.5;
-}
-
-.hero-actions {
-    display: flex;
-    gap: 16px;
-}
-
-.hero-btn.secondary {
-    background: transparent;
-    border: 1px solid white;
-    color: white;
-}
 
 /* Category Chips */
 .category-chips {
@@ -1618,59 +1565,7 @@ body.player-bar-hidden .player-bar {
     color: rgba(255, 255, 255, 0.4);
 }
 
-/* ─── Search Discovery Hub ──────────────────────────────────────────────────── */
-.search-discovery-hub {
-    animation: hubFadeIn 0.5s ease;
-}
 
-@keyframes hubFadeIn {
-    from { opacity: 0; transform: translateY(12px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-/* Hero Section with Visualizer */
-.search-hero-section {
-    position: relative;
-    border-radius: var(--border-radius-lg);
-    overflow: hidden;
-    padding: 40px 32px;
-    margin-bottom: 28px;
-    background: linear-gradient(135deg, rgba(255,0,0,0.08) 0%, rgba(40,0,80,0.12) 50%, rgba(0,40,80,0.08) 100%);
-    border: 1px solid rgba(255,255,255,0.06);
-}
-
-.search-hero-visual {
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    opacity: 0.6;
-    pointer-events: none;
-}
-
-.search-hero-visual canvas {
-    width: 100%;
-    height: 100%;
-}
-
-.search-hero-text {
-    position: relative;
-    z-index: 1;
-}
-
-.search-hero-text h2 {
-    font-size: 32px;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    margin-bottom: 8px;
-    background: linear-gradient(135deg, #fff 60%, var(--primary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-.search-hero-text p {
-    color: var(--text-subdued);
-    font-size: 15px;
-    max-width: 500px;
-}
 
 /* Quick Search Chips Row */
 .quick-chips-row {
@@ -2583,63 +2478,7 @@ body.player-bar-hidden .player-bar {
     background: linear-gradient(135deg, rgba(255,0,60,0.3), rgba(160,0,255,0.2));
 }
 
-/* ---- Explore CTA ---- */
-.home-explore-cta {
-    margin: 8px 24px 32px;
-    padding: 28px 28px;
-    border-radius: 24px;
-    background: linear-gradient(135deg, rgba(255,0,60,0.2) 0%, rgba(120,0,255,0.2) 60%, rgba(0,180,255,0.1) 100%);
-    border: 1px solid rgba(255,255,255,0.1);
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-}
 
-.home-explore-cta::before {
-    content: '';
-    position: absolute;
-    top: -60%;
-    right: -20%;
-    width: 200px;
-    height: 200px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%);
-    pointer-events: none;
-}
-
-.home-explore-cta-text h4 {
-    font-size: 20px;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    margin-bottom: 4px;
-}
-
-.home-explore-cta-text p {
-    font-size: 13px;
-    color: rgba(255,255,255,0.55);
-}
-
-.home-explore-cta-btn {
-    flex-shrink: 0;
-    padding: 10px 22px;
-    background: #fff;
-    color: #000;
-    border-radius: 999px;
-    font-weight: 700;
-    font-size: 14px;
-    cursor: pointer;
-    border: none;
-    transition: all 0.2s var(--ease-smooth);
-    font-family: 'Outfit', sans-serif;
-}
-
-.home-explore-cta-btn:hover {
-    transform: scale(1.05);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
-}
 
 /* ---- Responsive Mobile ---- */
 @media (max-width: 768px) {
@@ -2679,10 +2518,5 @@ body.player-bar-hidden .player-bar {
         padding: 8px 16px 16px;
     }
 
-    .home-explore-cta {
-        margin: 8px 16px 24px;
-        padding: 20px 20px;
-        flex-direction: column;
-        align-items: flex-start;
-    }
+
 }

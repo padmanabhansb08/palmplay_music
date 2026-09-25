@@ -1573,8 +1573,7 @@ body.now-playing-open {
 .content-wrapper,
 #main-content,
 .card-grid,
-.lang-page,
-.search-discovery-hub {
+.lang-page {
     overflow-x: hidden;
     max-width: 100%;
     box-sizing: border-box;
@@ -1840,19 +1839,7 @@ body.now-playing-open {
         overflow-x: hidden;
     }
 
-    .search-hero-section {
-        flex-direction: column;
-        gap: 16px;
-    }
 
-    .search-hero-visual {
-        display: none;
-    }
-
-    .hero-section {
-        padding: 24px 16px !important;
-        min-height: 0 !important;
-    }
 
     .hero-title {
         font-size: 28px !important;
