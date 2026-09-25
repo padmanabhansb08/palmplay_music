@@ -1533,10 +1533,6 @@ body.now-playing-open {
     text-decoration: underline;
 }
 
-.meta-sep {
-    color: var(--text-subdued);
-    pointer-events: none;
-}
 
 .meta-album {
     color: var(--text-subdued);

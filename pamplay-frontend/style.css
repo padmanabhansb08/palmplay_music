@@ -2010,14 +2010,7 @@ body.player-bar-hidden .player-bar {
     max-width: 100%;
 }
 
-.lang-track-artist {
-    font-size: 11px;
-    color: var(--text-subdued);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-}
+
 
 /* Desktop: all moods visible, horizontal row */
 @media (min-width: 1025px) {
@@ -2054,8 +2047,7 @@ body.player-bar-hidden .player-bar {
         aspect-ratio: unset;
     }
 
-    .lang-track-name,
-    .lang-track-artist {
+    .lang-track-name {
         max-width: 160px;
     }
 }
