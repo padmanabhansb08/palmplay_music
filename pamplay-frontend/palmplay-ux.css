@@ -1077,15 +1077,6 @@ body.now-playing-open {
     100% { background-position: -200% 0; }
 }
 
-/* ─── PalmPlay branding on explore hero ─── */
-.hero-badge {
-    background: rgba(255, 255, 255, 0.1) !important;
-    color: var(--text-subdued) !important;
-}
-
-.hero-subtitle {
-    max-width: 520px;
-}
 
 /* ─── Empty / error states ─── */
 .state-message {
@@ -1841,19 +1832,7 @@ body.now-playing-open {
 
 
 
-    .hero-title {
-        font-size: 28px !important;
-    }
 
-    .hero-actions {
-        flex-direction: column;
-        width: 100%;
-    }
-
-    .hero-actions .hero-btn {
-        width: 100%;
-        justify-content: center;
-    }
 
     .lang-track-card,
     .card {
