@@ -957,7 +957,12 @@ document.addEventListener('DOMContentLoaded', () => {
         setupEventListeners();
         setupKeyboardShortcuts();
 
-
+        // Start the first-visit home feed NOW, in parallel with auth + cloud sync
+        // (which can take seconds for signed-in users). renderHome() later joins
+        // this same request instead of waiting for it to start.
+        if (!ppRoutes().isExplorePage() && !readHomeFeedCache()) {
+            fetchHomeFeed().catch((e) => console.warn('Home feed prefetch failed', e));
+        }
 
         if (window.PalmPlayAuth) await window.PalmPlayAuth.init();
         const user = getSavedUser();
@@ -1928,10 +1933,26 @@ document.addEventListener('DOMContentLoaded', () => {
         update();
     }
 
+    // On a slow / data-saver connection use the 160 kbps stream instead of 320 kbps:
+    // playback starts ~2x sooner and rebuffers far less, with little audible loss.
+    function isSlowConnection() {
+        const c = navigator.connection;
+        return !!c && (c.saveData || /^(slow-2g|2g|3g)$/.test(c.effectiveType || ''));
+    }
+
+    function pickStreamUrl(arr) {
+        if (isSlowConnection() && Array.isArray(arr) && arr.length > 2) {
+            const mid = arr[arr.length - 2];
+            const u = mid && (mid.url || mid.link);
+            if (u) return u;
+        }
+        return pickMediaUrl(arr);
+    }
+
     function parseCatalogSong(t) {
         if (!t) return null;
         const img = pickMediaUrl(t.image) || DEFAULT_ART_URL;
-        const streamUrl = pickMediaUrl(t.downloadUrl);
+        const streamUrl = pickStreamUrl(t.downloadUrl);
         if (!streamUrl) return null;
 
         let artist = '';
@@ -2814,16 +2835,20 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        // Resolve in small concurrent batches rather than all at once: the catalog
-        // API is a single self-hosted proxy, and firing 20+ simultaneous lookups
-        // trips its rate limiting, causing more retries/backoff than it saves.
-        const BATCH_SIZE = 8;
-        const resolved = [];
-        for (let i = 0; i < list.length; i += BATCH_SIZE) {
-            const batch = list.slice(i, i + BATCH_SIZE);
-            const chunk = await Promise.all(batch.map(resolveOne));
-            resolved.push(...chunk.filter(Boolean));
-        }
+        // Resolve with a small worker pool rather than all 20 at once (a burst of
+        // 20+ lookups can trip the API's rate limiting). Unlike fixed batches
+        // there is NO wait-for-the-slowest barrier between waves: as soon as one
+        // lookup finishes its worker takes the next song. Order is preserved.
+        const POOL_SIZE = 10;
+        const slots = new Array(list.length);
+        let nextIdx = 0;
+        await Promise.all(Array.from({ length: Math.min(POOL_SIZE, list.length) }, async () => {
+            while (nextIdx < list.length) {
+                const i = nextIdx++;
+                slots[i] = await resolveOne(list[i]);
+            }
+        }));
+        const resolved = slots.filter(Boolean);
 
         if (resolved.length) setCachedCuratedTracks(resolved);
         return resolved;
@@ -2851,7 +2876,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function fetchHomeFeed() {
+    // One shared in-flight home-feed fetch: init() starts it early (before auth /
+    // cloud sync) and renderHome() joins it instead of starting a second one.
+    // `onPartial` receives the quick rows as soon as they're ready, before the
+    // slower curated-trending lookups finish, so the page can paint progressively.
+    let homeFeedInflight = null;
+    let homeFeedPartial = null;
+    const homeFeedPartialListeners = new Set();
+
+    function fetchHomeFeed(onPartial) {
+        if (typeof onPartial === 'function') {
+            homeFeedPartialListeners.add(onPartial);
+            if (homeFeedPartial) {
+                try { onPartial(homeFeedPartial); } catch (e) { console.warn(e); }
+            }
+        }
+        if (!homeFeedInflight) {
+            homeFeedInflight = fetchHomeFeedUncached().finally(() => {
+                homeFeedInflight = null;
+                homeFeedPartial = null;
+                homeFeedPartialListeners.clear();
+            });
+        }
+        return homeFeedInflight;
+    }
+
+    async function fetchHomeFeedUncached() {
         try {
             const cached = localStorage.getItem(HOME_FEED_CACHE_KEY);
             if (cached) {
@@ -2869,13 +2919,24 @@ document.addEventListener('DOMContentLoaded', () => {
         let allMusic = [];
 
         try {
-            [trending, picks, artists, albums, allMusic] = await Promise.all([
-                fetchCuratedTrendingTracks(20).catch(e => { console.warn(e); return []; }),
+            const trendingP = fetchCuratedTrendingTracks(20).catch(e => { console.warn(e); return []; });
+            const rowsP = Promise.all([
                 fetchCatalogTracks('latest hits', 8).catch(() => []),
                 fetchCatalogTracks('top artists', 8).catch(() => []),
                 fetchCatalogTracks('top albums', 8).catch(() => []),
                 fetchCatalogTracks('popular tracks', 8).catch(() => [])
             ]);
+            // The four simple rows return well before the 20 curated lookups
+            // finish — publish them now so the page can paint immediately.
+            rowsP.then(([p, a, al, am]) => {
+                if (p.length || a.length || al.length || am.length) {
+                    homeFeedPartial = { trending: [], picks: p, artists: a, albums: al, allMusic: am };
+                    homeFeedPartialListeners.forEach((fn) => { try { fn(homeFeedPartial); } catch (e) { console.warn(e); } });
+                }
+            });
+            let rows;
+            [trending, rows] = await Promise.all([trendingP, rowsP]);
+            [picks, artists, albums, allMusic] = rows;
         } catch (e) {
             console.warn('Home picks fetch failed', e);
         }
@@ -3597,7 +3658,8 @@ document.addEventListener('DOMContentLoaded', () => {
         card.dataset.tIdx = tIdx;
         const art = track.art || DEFAULT_ART_URL;
         card.innerHTML = `
-            <div class="card-image" style="background-image: url('${escapeHtml(art)}')">
+            <div class="card-image">
+                <img class="card-img" src="${escapeHtml(art)}" alt="" loading="lazy" decoding="async">
                 <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
             </div>
             <div class="card-title">${escapeHtml(track.name)}</div>
@@ -3610,6 +3672,11 @@ document.addEventListener('DOMContentLoaded', () => {
         attachCardActions(card, track, plIndex, tIdx, options);
         return card;
     }
+
+    // Card artwork uses native <img loading="lazy">: each home page has 60+ cards,
+    // and downloading every cover up-front (including far-off rows) competes with
+    // the audio stream and the visible cards for bandwidth. The browser itself
+    // decides when an image is near the screen — no JS observer to go wrong.
 
     function appendHomeSection(parent, title, subtitle, variant) {
         const section = document.createElement('section');
@@ -3898,7 +3965,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         renderHomeMoodTiles(cardGrid);
 
-        renderTrackRow(cardGrid, 'Trending Songs', 'Popular on PalmPlay', feed.trending, 'home_trending');
+        if (options.pendingTrending && !feed.trending?.length) {
+            appendHomeSection(cardGrid, 'Trending Songs', 'Popular on PalmPlay').innerHTML = skeletonCardGrid(6);
+        } else {
+            renderTrackRow(cardGrid, 'Trending Songs', 'Popular on PalmPlay', feed.trending, 'home_trending');
+        }
         renderTrackRow(cardGrid, 'Top Artists', 'Discover new artists', feed.artists, 'home_artists');
         renderTrackRow(cardGrid, 'Top Albums', 'Binge listen', feed.albums, 'home_albums');
         renderTrackRow(cardGrid, 'All Music', 'More to explore', feed.allMusic, 'home_all');
@@ -4025,7 +4096,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         cardGrid.innerHTML = `<div class="home-loading">${skeletonCardGrid(6)}</div>`;
-        const feed = await fetchHomeFeed();
+        const feed = await fetchHomeFeed((partial) => {
+            // Quick rows are ready: show them now, with a placeholder where the
+            // (slower) Trending row will land so nothing jumps when it arrives.
+            if (state.currentView !== 'home') return;
+            paintHomeFeed(partial, { pendingTrending: true });
+        });
         if (state.currentView !== 'home') return;
         paintHomeFeed(feed);
         loadHomeForYouRow(feed);
@@ -5000,8 +5076,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const fetchRaw = async (q) => {
-            let retries = 3;
-            let delay = 500;
+            // Two retries with short backoff (was 3 retries, up to ~3 s of waiting):
+            // a flaky request now fails over quickly instead of stalling the UI.
+            let retries = 2;
+            let delay = 350;
             while (retries >= 0) {
                 try {
                     const url = `${MUSIC_CATALOG_API_BASE}/search/songs?query=${encodeURIComponent(q)}&limit=${limit}`;
@@ -5092,6 +5170,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let catalogSearchTimeout = null;
+    let catalogSearchSeq = 0; // bumps on every keystroke; stale responses are dropped
+    const SEARCH_DEBOUNCE_MS = 250; // was 800 ms of dead time after the last keystroke
 
     // ─── Language Landing Page ─────────────────────────────────────────────────
     window._openLanguagePage = function(langIdx) {
@@ -5341,6 +5421,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const lowQuery = query.toLowerCase();
 
         if (state.currentView === 'explore') {
+            catalogSearchSeq++; // invalidate any request still in flight for an older query
             const hub = cardGrid.querySelector('.search-discovery-hub');
             const localSection = document.getElementById('local-search-results');
 
@@ -5365,7 +5446,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             catalogContainer.style.display = 'block';
-            catalogGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;"><i class="fas fa-spinner fa-spin"></i> Searching...</p>';
+            catalogGrid.setAttribute('aria-busy', 'true');
+            catalogGrid.innerHTML = skeletonCardGrid(8);
+            const searchSeq = catalogSearchSeq;
 
             catalogSearchTimeout = setTimeout(async () => {
                 try {
@@ -5385,7 +5468,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     });
 
-                    const catalogTracks = await fetchCatalogTracks(query, 30);
+                    // 20 results (not 30): ~100 KB instead of ~150 KB per search, same latency.
+                    const catalogTracks = await fetchCatalogTracks(query, 20);
+
+                    // The user kept typing (or left Explore) while this was loading — a newer
+                    // search owns the grid now, so don't overwrite it with stale results.
+                    if (searchSeq !== catalogSearchSeq || state.currentView !== 'explore') return;
+                    catalogGrid.removeAttribute('aria-busy');
 
                     if (matchedLocal.length === 0 && catalogTracks.length === 0) {
                         catalogGrid.innerHTML = '<p style="color:var(--text-subdued); padding:20px;">No tracks found for "' + escapeHtml(query) + '". Try different keywords.</p>';
@@ -5446,9 +5535,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 } catch (e) {
                     console.error('Catalog search failed:', e);
+                    if (searchSeq !== catalogSearchSeq) return;
+                    catalogGrid.removeAttribute('aria-busy');
                     catalogGrid.innerHTML = '<p style="color:#ff4444; padding:20px;"><i class="fas fa-exclamation-triangle"></i> Could not load results. Check your connection.</p>';
                 }
-            }, 800);
+            }, SEARCH_DEBOUNCE_MS);
         }
     }
 

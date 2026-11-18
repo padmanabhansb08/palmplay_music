@@ -36,6 +36,26 @@
     var override = readOverride();
     var isTV = override !== null ? override : TV_UA.test(navigator.userAgent);
 
+    // ── Low-power ("lite") rendering ─────────────────────────────────────────
+    // Glass blur (backdrop-filter) and large blurred layers are what make scrolling
+    // stutter on TVs and low-end phones/laptops. Lite mode removes them and uses
+    // solid backgrounds instead. Auto: TVs, data-saver, <=4 GB RAM or <=4 CPU cores.
+    // Override with ?lite=1 / ?lite=0 (remembered).
+    function readLite() {
+        try {
+            var q = new URLSearchParams(location.search).get('lite');
+            if (q === '1' || q === '0') { localStorage.setItem('palmplay_lite', q); return q === '1'; }
+            var s = localStorage.getItem('palmplay_lite');
+            if (s === '1' || s === '0') return s === '1';
+        } catch (e) { /* storage blocked */ }
+        var c = navigator.connection || {};
+        return !!(isTV || c.saveData ||
+            (navigator.deviceMemory && navigator.deviceMemory <= 4) ||
+            (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4));
+    }
+    var isLite = readLite();
+    root.classList.toggle('perf-lite', isLite);
+
     function computeZoom(w) {
         if (isTV) return Math.min(4, Math.max(1, w / 1280));
         if (w > 1920) return Math.min(1.6, 1 + (w - 1920) / 1920 * 0.5); // 2560→1.17, 3840→1.5
@@ -65,6 +85,13 @@
         /* player text sized for distance (13px desktop → 24px on a 1080p TV) */
         'html.tv-mode .player-bar .track-name { font-size: 16px !important; }',
         'html.tv-mode .player-bar .artist-name { font-size: 13px !important; }',
+        /* low-power mode: no glass blur / big blurred layers; solid bars instead */
+        'html.perf-lite *, html.perf-lite *::before, html.perf-lite *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }',
+        'html.perf-lite .gradient-orb { display: none !important; }',
+        'html.perf-lite #np-bg-layer, html.perf-lite .home-hero-blur { filter: none !important; }',
+        'html.perf-lite .sidebar, html.perf-lite .top-header { background-color: rgba(12,12,12,.94) !important; }',
+        'html.perf-lite .player-bar, html.perf-lite .bottom-nav, html.perf-lite .mobile-bottom-nav { background-color: rgba(10,10,10,.97) !important; }',
+        'html.perf-lite .card:hover { box-shadow: 0 8px 16px rgba(0,0,0,.35); }',
         /* nobody hovers on a TV; keep the custom scrollbar out of the way */
         'html.tv-mode ::-webkit-scrollbar { width: 0; height: 0; }'
     ].join('\n');
@@ -245,5 +272,11 @@
             apply();
         },
         zoom: function () { return parseFloat(root.style.zoom) || 1; },
+        isLite: function () { return isLite; },
+        setLite: function (v) {
+            isLite = !!v;
+            try { localStorage.setItem('palmplay_lite', isLite ? '1' : '0'); } catch (e) {}
+            root.classList.toggle('perf-lite', isLite);
+        },
     };
 })();

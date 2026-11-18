@@ -150,10 +150,12 @@ body.page-leaving #app {
     width: 800px;
     height: 800px;
     border-radius: 50%;
-    filter: blur(140px);
+    /* The radial-gradient already fades smoothly to transparent; the extra
+       filter:blur(140px) on 800px layers was pure GPU cost with no visible gain. */
     opacity: 0.2;
     background: radial-gradient(circle, var(--primary), transparent 70%);
     pointer-events: none;
+    will-change: transform;
     transition: transform 0.5s ease-out;
 }
 
@@ -617,7 +619,10 @@ body.lang-view-active .top-header .search-container.premium-search {
 
 .card {
     background: var(--bg-elevated);
-    backdrop-filter: blur(10px);
+    /* No backdrop-filter here: with 60+ cards on screen the browser re-blurred
+       66 separate regions on every scroll frame (the main cause of scroll lag on
+       phones/TVs). The background behind a card is a smooth dark gradient, so the
+       blur was invisible anyway. */
     border: 1px solid var(--glass-border);
     padding: 16px;
     border-radius: var(--border-radius-md);
@@ -636,12 +641,23 @@ body.lang-view-active .top-header .search-container.premium-search {
     width: 100%;
     aspect-ratio: 1;
     border-radius: var(--border-radius-sm);
+    background-color: rgba(255, 255, 255, 0.06); /* placeholder until the lazy image loads */
     background-size: cover;
     background-position: center;
     margin-bottom: 16px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
     position: relative;
     overflow: hidden;
+}
+
+/* Lazy-loaded cover (native <img loading="lazy">) fills the square like the old background-image did. */
+.card-image > .card-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 
 .play-btn-overlay {
