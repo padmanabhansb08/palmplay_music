@@ -472,6 +472,30 @@ document.addEventListener('DOMContentLoaded', () => {
             const t = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
             if (t) toggleLike(t, state.currentPlaylistIndex, state.currentTrackIndex);
         },
+
+        // ── Overlays & mute (same actions as the buttons / keyboard shortcuts) ──
+        /** Clicks the real mute button so icon, state and toast stay identical. */
+        toggleMute() {
+            const btn = document.getElementById('mute-btn');
+            if (btn) btn.click();
+            return state.isMuted;
+        },
+        isNowPlayingOpen: () => document.body.classList.contains('now-playing-open'),
+        openNowPlaying() {
+            if (!document.body.classList.contains('now-playing-open')) window.openNowPlaying?.();
+        },
+        isQueueOpen: () => !!document.getElementById('queue-drawer')?.classList.contains('open'),
+        toggleQueue() {
+            // The queue drawer sits underneath the full-screen player, so close that first.
+            if (document.body.classList.contains('now-playing-open')) window.closeNowPlaying?.();
+            window.toggleQueue?.();
+        },
+        /** Dismiss the top-most overlay: full-screen player first, then the queue. */
+        dismissOverlay() {
+            if (document.body.classList.contains('now-playing-open')) { window.closeNowPlaying?.(); return 'player'; }
+            if (document.getElementById('queue-drawer')?.classList.contains('open')) { window.toggleQueue?.(false); return 'queue'; }
+            return null;
+        },
     };
 
     // UI Elements

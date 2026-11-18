@@ -9,7 +9,10 @@
 //   👍 Thumb up (hold)         → Volume up (repeats while held)
 //   👎 Thumb down (hold)       → Volume down (repeats while held)
 //   🤟 "I love you" (hold)     → Like / unlike current track
+//   🤙 Shaka (hold)            → Mute / unmute
+//   3️⃣ Three fingers (hold)    → Open / close the queue
 //   👋 Swipe hand left / right → Previous / next track
+//   ⬆️⬇️ Swipe OPEN hand up / down → Open / close the full-screen player
 //
 // Exposes window.PalmGestures = { start, stop, isRunning, Interpreter }
 // and talks to the player only through window.PalmPlayer (defined in app.js).
@@ -23,8 +26,10 @@
     const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
 
     const CONFIG = {
-        minScore: 0.6,          // classifier confidence needed for a frame to count
-        switchMs: 70,           // a new label must persist this long (~2 frames; kills 1-frame flicker)
+        minScore: 0.6,          // classifier confidence needed to START counting a pose…
+        exitScore: 0.45,        // …but once held, it only drops below this (hysteresis: no boundary flicker)
+        voteWindow: 5,          // a pose must win a strict majority of the last N frames (kills flicker)
+        geometryScore: 0.65,    // confidence given to a pose decided by finger geometry alone (normal hold)
         holdMs: 260,            // a pose must be held (still) this long before it fires
         fastScore: 0.85,        // ...but if the model is this confident,
         fastHoldMs: 160,        // ...this much hold is enough
@@ -37,8 +42,98 @@
         swipeMinDx: 0.25,       // horizontal travel needed (fraction of frame width)
         swipeMaxDy: 0.15,       // and not too much vertical travel
         swipeRestMs: 150,       // hand must rest this long before a swipe (filters out waving)
-        lostHandResetMs: 180,   // hand missing this long → reset everything (counts as "released")
+        swipeMinDy: 0.28,       // vertical swipe (full-screen player): travel needed, fraction of frame height
+        swipeMaxDx: 0.15,       // …with little sideways drift; also needs an OPEN hand (see openHand)
+        lostHandResetMs: 250,   // hand missing this long → reset everything (counts as "released");
+                                // shorter gaps (dropped detection frames, motion blur) keep all state
     };
+
+    // ── Finger geometry (rule-based, from MediaPipe's 21 hand landmarks) ──────
+    // The built-in classifier is a best-guess over 7 fixed poses and confuses
+    // look-alikes (✌️/☝️, 👍/✊). Finger extension measured directly from the
+    // landmarks is deterministic, so we use it to confirm or correct the
+    // classifier. All distances are divided by the hand's own size (wrist →
+    // middle knuckle), so it works near/far from the camera, and it compares
+    // distances rather than raw y, so a tilted/sideways hand still works.
+    const LM = { WRIST: 0, THUMB_MCP: 2, THUMB_IP: 3, THUMB_TIP: 4, INDEX_MCP: 5, INDEX_PIP: 6, INDEX_TIP: 8,
+        MIDDLE_MCP: 9, MIDDLE_PIP: 10, MIDDLE_TIP: 12, RING_PIP: 14, RING_TIP: 16, PINKY_MCP: 17, PINKY_PIP: 18, PINKY_TIP: 20 };
+
+    const dist2d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+    // Extension margin = (tip→wrist − pip→wrist) / hand size. Measured on a
+    // proportional hand model: straight ≈ +0.35…+0.50, fully curled ≈ −0.27…−0.43,
+    // relaxed half-curl ≈ 0.00. Two readings:
+    //   lenient (> 0.10)      – used to CONFIRM what the classifier saw;
+    //   strict (> 0.22 / < −0.12, else "unsure") – required before geometry may
+    //     OVERRIDE the classifier, so a relaxed hand never becomes a command.
+    const EXT_LENIENT = 0.10, EXT_STRICT = 0.22, CURL_STRICT = -0.12;
+    const THUMB_LENIENT = 0.05, THUMB_STRICT = 0.12, THUMB_IN_STRICT = -0.05;
+
+    /**
+     * @returns {{fingers:boolean[], strict:(boolean|null)[], thumbDir:'up'|'down'|'side'}}
+     *   fingers/strict = [thumb, index, middle, ring, pinky]; strict uses null for "unsure".
+     */
+    function analyzeHand(lm) {
+        const scale = Math.max(1e-6, dist2d(lm[LM.WRIST], lm[LM.MIDDLE_MCP]));
+        const w = lm[LM.WRIST];
+        const margin = (tip, pip) => (dist2d(lm[tip], w) - dist2d(lm[pip], w)) / scale;
+        const m = [margin(LM.INDEX_TIP, LM.INDEX_PIP), margin(LM.MIDDLE_TIP, LM.MIDDLE_PIP),
+            margin(LM.RING_TIP, LM.RING_PIP), margin(LM.PINKY_TIP, LM.PINKY_PIP)];
+        // Thumb: extended if its tip is clearly further from the pinky knuckle than its IP joint (splayed out).
+        const tm = (dist2d(lm[LM.THUMB_TIP], lm[LM.PINKY_MCP]) - dist2d(lm[LM.THUMB_IP], lm[LM.PINKY_MCP])) / scale;
+
+        // Thumb direction from the thumb's own angle (scale-free): within ~57° of
+        // vertical counts as up/down. Image y grows downward.
+        const vx = lm[LM.THUMB_TIP].x - lm[LM.THUMB_MCP].x, vy = lm[LM.THUMB_TIP].y - lm[LM.THUMB_MCP].y;
+        const vlen = Math.hypot(vx, vy) || 1e-6;
+        const up = -vy / vlen;
+        const thumbDir = up > 0.55 ? 'up' : up < -0.55 ? 'down' : 'side';
+
+        return {
+            fingers: [tm > THUMB_LENIENT, ...m.map((v) => v > EXT_LENIENT)],
+            strict: [tm > THUMB_STRICT ? true : tm < THUMB_IN_STRICT ? false : null,
+                ...m.map((v) => (v > EXT_STRICT ? true : v < CURL_STRICT ? false : null))],
+            thumbDir,
+            margins: { thumb: tm, fingers: m },
+        };
+    }
+
+    // Finger patterns per pose: [thumb, index, middle, ring, pinky]; null = don't care.
+    const POSE_RULES = {
+        ILoveYou:    { p: [true, true, false, false, true] },
+        Shaka:         { p: [true, false, false, false, true] },   // 🤙 thumb + pinky out
+        Three_Fingers: { p: [null, true, true, true, false] },     // index+middle+ring up, pinky curled
+        Victory:     { p: [null, true, true, false, false] },
+        Pointing_Up: { p: [null, true, false, false, false] },
+        Thumb_Up:    { p: [true, false, false, false, false], thumb: 'up' },
+        Thumb_Down:  { p: [true, false, false, false, false], thumb: 'down' },
+        Open_Palm:   { p: [null, true, true, true, true] },
+        // A fist's thumb is tucked. A thumb sticking out (up, down OR sideways)
+        // is a deliberate thumb gesture, not "pause".
+        Closed_Fist: { p: [false, false, false, false, false] },
+    };
+
+    /** strict=true: every required finger must be clearly (not "unsure") in place. */
+    function poseFits(label, g, strict = false) {
+        const r = POSE_RULES[label];
+        if (!r) return false;
+        const f = strict ? g.strict : g.fingers;
+        for (let i = 0; i < 5; i++) if (r.p[i] !== null && r.p[i] !== f[i]) return false;
+        if (r.thumb && g.thumbDir !== r.thumb) return false;
+        return true;
+    }
+
+    /** Flat/open hand: at least 3 of the 4 fingers extended (thumb ignored). True if landmarks are unavailable. */
+    function openHand(lm) {
+        if (!lm || lm.length < 21) return true;
+        return analyzeHand(lm).fingers.slice(1).filter(Boolean).length >= 3;
+    }
+
+    /** First pose whose finger pattern CLEARLY fits (strict), or null. */
+    function geometryPose(g) {
+        for (const label of Object.keys(POSE_RULES)) if (poseFits(label, g, true)) return label;
+        return null;
+    }
 
     const GESTURE_MAP = {
         Open_Palm:   { action: 'play',    label: 'Play',        icon: 'fa-play',          emoji: '✋' },
@@ -48,6 +143,10 @@
         Thumb_Up:    { action: 'volUp',   label: 'Volume up',   icon: 'fa-volume-up',     emoji: '👍', repeat: true },
         Thumb_Down:  { action: 'volDown', label: 'Volume down', icon: 'fa-volume-down',   emoji: '👎', repeat: true },
         ILoveYou:    { action: 'like',    label: 'Like',        icon: 'fa-heart',         emoji: '🤟' },
+        // Geometry-only poses: MediaPipe's classifier has no label for these, so
+        // they come purely from finger positions (see POSE_RULES).
+        Shaka:         { action: 'mute',  label: 'Mute / unmute', icon: 'fa-volume-mute', emoji: '🤙' },
+        Three_Fingers: { action: 'queue', label: 'Queue',         icon: 'fa-list',        emoji: '3️⃣' },
     };
 
     // ── Pure state machine: frames in, actions out. No DOM, easy to test. ──────
@@ -63,8 +162,7 @@
         reset() {
             this.candidate = null;      // label currently being "held"
             this.since = 0;             // when the current hold started
-            this.pending = undefined;   // label trying to replace the candidate (undefined = none; null = "no pose")
-            this.pendingSince = 0;
+            this.votes = [];            // last N per-frame labels (null = no pose) for majority vote
             this.firedFor = null;       // discrete label already fired for this hold
             this.lastRepeat = -Infinity;
             this.track = [];            // recent wrist positions [{x,y,t}]
@@ -75,8 +173,34 @@
         }
 
         /**
-         * @param {{t:number, gesture?:string|null, score?:number, wrist?:{x:number,y:number}|null}} f
-         *        wrist is in raw (un-mirrored) camera coordinates, 0..1
+         * Decide this frame's pose from the classifier + finger geometry.
+         *  - classifier label that the finger geometry agrees with → accept it;
+         *  - otherwise, if the geometry clearly matches a pose → use that
+         *    (fixes ✌️/☝️ and 👍/✊ mix-ups, and catches poses the classifier
+         *    scored too low);
+         *  - otherwise → no pose.
+         * Hysteresis: a pose already being held needs only exitScore to stay.
+         */
+        frameLabel(f) {
+            const c = this.cfg;
+            let cls = (f.gesture && f.gesture !== 'None' && this.map[f.gesture]) ? f.gesture : null;
+            const need = cls && cls === this.candidate ? c.exitScore : c.minScore;
+            if (cls && (f.score ?? 0) < need) cls = null;
+
+            if (!f.landmarks || f.landmarks.length < 21) {
+                return { label: cls, score: cls ? f.score : 0 };          // no landmarks: classifier only
+            }
+            const g = analyzeHand(f.landmarks);
+            if (cls && poseFits(cls, g)) return { label: cls, score: f.score, geometry: g };
+            const geo = geometryPose(g);
+            if (geo && this.map[geo]) return { label: geo, score: c.geometryScore, geometry: g, viaGeometry: true };
+            return { label: null, score: 0, geometry: g };
+        }
+
+        /**
+         * @param {{t:number, gesture?:string|null, score?:number, wrist?:{x:number,y:number}|null,
+         *          landmarks?:{x:number,y:number}[]}} f
+         *        wrist/landmarks are in raw (un-mirrored) camera coordinates, 0..1
          * @returns {{action:string|null, via?:string, candidate:string|null, progress:number, moving:boolean}}
          */
         update(f) {
@@ -113,7 +237,16 @@
                 // THEIR right, x DEcreases. Flip so +dx = user's right.
                 const dx = -(f.wrist.x - this.anchor.x);
                 const dy = f.wrist.y - this.anchor.y;
+                // Horizontal flick = next/previous. Vertical flick of an OPEN hand =
+                // open/close the full-screen player (a fist or pointing hand moving
+                // up/down is just someone moving their arm, so it's ignored).
+                let swipeAction = null;
                 if (Math.abs(dx) >= c.swipeMinDx && Math.abs(dy) <= c.swipeMaxDy) {
+                    swipeAction = dx > 0 ? 'next' : 'prev';
+                } else if (Math.abs(dy) >= c.swipeMinDy && Math.abs(dx) <= c.swipeMaxDx && openHand(f.landmarks)) {
+                    swipeAction = dy < 0 ? 'openPlayer' : 'closePlayer';   // image y grows downward
+                }
+                if (swipeAction) {
                     this.lastSwipe = t;
                     this.lastFire = t;  // also block a pose action right after a swipe
                     this.track = [];
@@ -121,28 +254,27 @@
                     this.stillSince = null;
                     this.candidate = null;
                     this.firedFor = null;
-                    return { action: dx > 0 ? 'next' : 'prev', via: 'swipe', candidate: null, progress: 0, moving: true };
+                    return { action: swipeAction, via: 'swipe', candidate: null, progress: 0, moving: true };
                 }
             }
 
-            // --- pose (debounced) -------------------------------------------
-            let label = (f.gesture && f.gesture !== 'None' && (f.score ?? 0) >= c.minScore) ? f.gesture : null;
-            if (label && !this.map[label]) label = null;
+            // --- pose: per-frame label → majority vote → hold ----------------
+            const fl = this.frameLabel(f);
+            const label = fl.label;
+            this.votes.push(label);
+            if (this.votes.length > c.voteWindow) this.votes.shift();
 
-            if (label !== this.candidate) {
-                if (label !== this.pending) {
-                    this.pending = label;
-                    this.pendingSince = t;
-                }
-                if (t - this.pendingSince >= c.switchMs || this.candidate === null) {
-                    this.candidate = label;
-                    this.since = t;
-                    this.conf = null;
-                    this.pending = undefined;
-                    if (label !== this.firedFor) this.firedFor = null;
-                }
-            } else {
-                this.pending = undefined;
+            // Strict majority of the recent frames wins; no majority → no pose.
+            const counts = new Map();
+            for (const v of this.votes) counts.set(v, (counts.get(v) || 0) + 1);
+            let winner = null;
+            for (const [v, n] of counts) if (n * 2 > this.votes.length) winner = v;
+
+            if (winner !== this.candidate) {
+                this.candidate = winner;
+                this.since = t;
+                this.conf = null;
+                if (winner !== this.firedFor) this.firedFor = null;
             }
 
             if (!this.candidate) return { action: null, candidate: null, progress: 0, moving };
@@ -151,7 +283,7 @@
             if (moving) this.since = t;
 
             // Smoothed confidence → confident poses fire sooner.
-            const s = label === this.candidate ? (f.score ?? 0) : 0;
+            const s = label === this.candidate ? (fl.score ?? 0) : 0;
             this.conf = this.conf == null ? s : this.conf * 0.6 + s * 0.4;
             const need = this.conf >= c.fastScore ? c.fastHoldMs : c.holdMs;
 
@@ -220,7 +352,7 @@
 
     // Self-contained styles so this module doesn't depend on the app's CSS files.
     const STYLES = `
-        .gesture-cam { position: fixed; right: 16px; bottom: calc(var(--player-height, 90px) + 24px); width: 220px; z-index: 900;
+        .gesture-cam { position: fixed; right: 16px; bottom: calc(var(--player-height, 90px) + 24px); width: 220px; z-index: 2100; /* above the full-screen player (2000) and queue (1500) */
             background: rgba(18,18,18,.94); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; overflow: hidden;
             box-shadow: 0 10px 30px rgba(0,0,0,.5); display: none; transition: box-shadow .2s, border-color .2s;
             font-family: inherit; color: #fff; }
@@ -270,6 +402,8 @@
             <div class="gesture-cam-guide" hidden>
                 ${Object.values(GESTURE_MAP).map(g => `<div><span>${g.emoji}</span> ${g.label}</div>`).join('')}
                 <div><span>👋</span> Swipe left/right: prev/next</div>
+                <div><span>⬆️</span> Swipe open hand up: full player</div>
+                <div><span>⬇️</span> Swipe open hand down: close</div>
             </div>`;
         document.body.appendChild(root);
         const guide = root.querySelector('.gesture-cam-guide');
@@ -323,7 +457,7 @@
     function perform(action) {
         const P = window.PalmPlayer;
         if (!P) { console.warn('[gestures] PalmPlayer bridge not ready'); return; }
-        const needsTrack = action !== 'volUp' && action !== 'volDown';
+        const needsTrack = ['play', 'pause', 'next', 'prev', 'like', 'openPlayer'].includes(action);
         if (needsTrack && !P.hasTrack()) {
             toast('Pick a song first, then gestures can control it', 'fa-hand-paper');
             return;
@@ -340,6 +474,10 @@
             case 'volUp':   toast(`Volume: ${P.changeVolume(+CONFIG.volumeStep)}%`, 'fa-volume-up'); break;
             case 'volDown': toast(`Volume: ${P.changeVolume(-CONFIG.volumeStep)}%`, 'fa-volume-down'); break;
             case 'like':    P.toggleLike(); break;
+            case 'mute':    P.toggleMute(); break;               // the app shows its own Muted/Unmuted toast
+            case 'queue':   P.toggleQueue(); break;
+            case 'openPlayer': P.openNowPlaying(); break;
+            case 'closePlayer': if (!P.dismissOverlay()) toast('Nothing to close', 'fa-chevron-down'); break;
         }
     }
 
@@ -368,6 +506,7 @@
             gesture: top ? top.categoryName : null,
             score: top ? top.score : 0,
             wrist: landmarks ? { x: landmarks[0].x, y: landmarks[0].y } : null,
+            landmarks: landmarks || null,
         });
 
         const def = out.candidate && GESTURE_MAP[out.candidate];
@@ -482,5 +621,6 @@
         }
     }
 
-    window.PalmGestures = { start, stop, isRunning: () => running, Interpreter, CONFIG, GESTURE_MAP };
+    window.PalmGestures = { start, stop, isRunning: () => running, Interpreter, CONFIG, GESTURE_MAP,
+        analyzeHand, geometryPose, poseFits };
 })();
