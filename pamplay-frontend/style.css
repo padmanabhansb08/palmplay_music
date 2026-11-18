@@ -64,21 +64,25 @@ body {
     background: #000000;
 }
 
-/* Page fade-in on load */
+/* Page fade-in on load.
+   Opacity ONLY — never animate `transform` on #app: any transform (even
+   translateY(0), or a start frame held while the tab is in the background)
+   makes #app the containing block for every position:fixed child, which
+   squashed the mobile mini-player into a ~20px grid cell and misplaced the
+   bottom nav / now-playing sheet. */
 @keyframes pp-fade-in {
-    from { opacity: 0; transform: translateY(6px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; }
+    to   { opacity: 1; }
 }
 
 #app {
-    animation: pp-fade-in 0.25s ease forwards;
+    animation: pp-fade-in 0.25s ease;
 }
 
 /* Page fade-out class — added by routes.js before navigation */
 body.page-leaving #app {
     opacity: 0;
-    transform: translateY(-6px);
-    transition: opacity 0.15s ease, transform 0.15s ease;
+    transition: opacity 0.15s ease;
     pointer-events: none;
 }
 

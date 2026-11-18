@@ -8,16 +8,22 @@
 
 /* ─── App shell ─── */
 @media (max-width: 1024px) {
-    #app {
-        padding-bottom: calc(var(--player-height) + var(--bottom-nav-height) + var(--safe-bottom));
+    :root {
+        --mini-player-height: 64px; /* matches .player-bar height at ≤1024px */
+    }
+
+    /* The player bar and bottom nav are position:fixed overlays here, so the
+       grid must not ALSO reserve a player row — that double-counted ~126px
+       of dead space above the mini-player. Reserve it once, via padding. */
+    #app,
+    body.player-expanded #app {
+        grid-template-rows: 1fr 0 !important;
+        padding-bottom: calc(var(--mini-player-height) + var(--bottom-nav-height) + var(--safe-bottom));
     }
 
     body.player-bar-hidden #app {
+        grid-template-rows: 1fr 0 !important;
         padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom));
-    }
-
-    body.player-expanded #app {
-        padding-bottom: calc(var(--player-expanded-height) + var(--bottom-nav-height) + var(--safe-bottom));
     }
 }
 
@@ -1745,7 +1751,10 @@ body.now-playing-open {
     .top-header {
         display: grid;
         grid-template-columns: 40px 40px 1fr auto;
-        grid-template-rows: auto 44px;
+        /* Row 2 (search) only exists when the search box is actually shown;
+           a fixed second row left an empty band under the header. */
+        grid-template-rows: auto;
+        grid-auto-rows: 44px;
         align-items: center;
         gap: 8px 10px;
         padding: 10px 12px 12px;
@@ -1908,7 +1917,7 @@ body.now-playing-open {
     }
 
     #app {
-        padding-bottom: calc(80px + var(--bottom-nav-height) + var(--safe-bottom));
+        padding-bottom: calc(var(--mini-player-height) + var(--bottom-nav-height) + var(--safe-bottom));
     }
 
     /* Now Playing: larger play button, better spacing on tiny screens */
@@ -1942,12 +1951,20 @@ body.now-playing-open {
         display: none !important;
     }
 
+    /* Player bar is position:fixed; reserve its height once (padding), not
+       also as a grid row — that left a 100px empty band above the player. */
     #app {
+        grid-template-rows: 1fr 0;
         padding-bottom: var(--player-height);
     }
 
     body.player-expanded #app {
-        padding-bottom: var(--player-expanded-height);
+        /* bar's min-height can exceed --player-expanded-height; never let it overlap content */
+        padding-bottom: max(var(--player-height), var(--player-expanded-height));
+    }
+
+    body.player-bar-hidden #app {
+        padding-bottom: 0;
     }
 
     .player-bar {
