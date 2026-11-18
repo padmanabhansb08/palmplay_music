@@ -277,27 +277,33 @@
 
         <form id="login-form">
             <div class="input-group">
-                <label>Email address or username</label>
-                <input type="text" id="login-email" placeholder="Email address or username" required>
+                <label for="login-email">Email address</label>
+                <input type="text" id="login-email" placeholder="you@example.com" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" required>
             </div>
             <div class="input-group">
-                <label>Password</label>
-                <input type="password" id="login-pass" placeholder="Password" required>
+                <label for="login-pass">Password</label>
+                <input type="password" id="login-pass" placeholder="Password" autocomplete="current-password" required>
             </div>
             <div id="turnstile-widget" style="display:none;"></div>
             <button type="submit" class="login-btn">Log In</button>
         </form>
 
-        <a href="#"
+        <a href="#" id="forgot-link"
             style="color: var(--text-base); text-decoration: none; font-size: 14px; display: block; margin-bottom: 24px;">Forgot
             your password?</a>
+        <style>
+            .auth-link-btn { display: block; margin: 0 auto 16px; background: none; border: none; color: var(--primary, #FF1744);
+                font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: underline; }
+            .auth-link-btn:disabled { opacity: .5; cursor: progress; }
+            .login-btn:disabled { opacity: .75; cursor: progress; }
+        </style>
 
         <script defer src="lib/routes.js"></script>
         <script defer src="supabase-config.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-        <script defer src="lib/palmplay-auth.js"></script>
+        <script defer src="lib/palmplay-auth.js?v=2"></script>
         <script defer src="lib/palmplay-captcha.js"></script>
-        <script defer src="lib/palmplay-login-page.js"></script>
+        <script defer src="lib/palmplay-login-page.js?v=2"></script>
         <script>
             document.addEventListener('DOMContentLoaded', () => {
                 window.PalmPlayLoginPage.initAuthForms('login');

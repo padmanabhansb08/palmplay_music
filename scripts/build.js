@@ -16,6 +16,26 @@ console.log('Copying index.html and pamplay-frontend to dist...');
 fs.cpSync(path.join(rootDir, 'index.html'), path.join(distDir, 'index.html'));
 fs.cpSync(srcDir, path.join(distDir, 'pamplay-frontend'), { recursive: true });
 
+// Production pages are served at /app (no trailing slash). Without a static
+// <base>, the browser's preload scanner resolves "style.css", "app.js", … against
+// "/" and downloads every asset twice (once as a 404) before the inline
+// base-href script runs. A static <base> carrying data-pp-base makes that
+// script a no-op and fixes resolution from the very first byte.
+console.log('Injecting static <base href="/app/"> into pages...');
+const pagesDir = path.join(distDir, 'pamplay-frontend');
+for (const file of fs.readdirSync(pagesDir).filter((f) => f.endsWith('.html'))) {
+    const p = path.join(pagesDir, file);
+    const html = fs.readFileSync(p, 'utf8');
+    if (html.includes('<base ')) continue;
+    const out = html.replace(/<head>/i, '<head>\n    <base href="/app/" data-pp-base="1">');
+    if (out === html) {
+        console.error(`  ! no <head> in ${file}; skipped`);
+        continue;
+    }
+    fs.writeFileSync(p, out);
+    console.log(`  ${file}`);
+}
+
 console.log('Minifying JS...');
 try {
     const jsTarget = path.join(distDir, 'pamplay-frontend', 'app.js');

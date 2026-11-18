@@ -45,18 +45,25 @@
         window.dispatchEvent(new CustomEvent('palmplay:authchange', { detail: null }));
     }
 
-    /** Where email confirm / magic links should land (not localhost). */
-    function getEmailRedirectUrl() {
-        if (window.PalmPlayRoutes?.page) {
-            return window.PalmPlayRoutes.page('home');
-        }
+    /**
+     * Absolute URL for email links (confirm sign-up, password reset).
+     * Supabase ignores relative paths like "/app" and falls back to the
+     * dashboard Site URL — which is how confirm links ended up on localhost.
+     */
+    function absoluteUrl(pageKey) {
         const origin = window.location.origin;
+        const path = window.PalmPlayRoutes?.page?.(pageKey);
+        if (path) return new URL(path, origin).href;
         const p = window.location.pathname;
-        if (p === '/app' || p.startsWith('/app/')) return `${origin}/app`;
         if (p.includes('/pamplay-frontend')) {
-            return `${origin}${p.substring(0, p.indexOf('/pamplay-frontend') + 16)}home.html`;
+            const base = p.substring(0, p.indexOf('/pamplay-frontend') + '/pamplay-frontend/'.length);
+            return `${origin}${base}${pageKey}.html`;
         }
-        return `${origin}/app`;
+        return `${origin}/app${pageKey === 'home' ? '' : '/' + pageKey}`;
+    }
+
+    function getEmailRedirectUrl() {
+        return absoluteUrl('home');
     }
 
     async function init() {
@@ -66,23 +73,41 @@
                 return false;
             }
             const { url, anonKey } = cfg();
-            client = window.supabase.createClient(url, anonKey, {
-                auth: {
-                    persistSession: true,
-                    autoRefreshToken: true,
-                    detectSessionInUrl: true
-                }
-            });
+            try {
+                client = window.supabase.createClient(url, anonKey, {
+                    auth: {
+                        persistSession: true,
+                        autoRefreshToken: true,
+                        detectSessionInUrl: true
+                    }
+                });
 
-            const { data: { session } } = await client.auth.getSession();
-            if (session?.user) writeStoredUser(profileFromSession(session));
+                client.auth.onAuthStateChange((event, session) => {
+                    if (event === 'PASSWORD_RECOVERY') {
+                        // User arrived from a "reset password" email link.
+                        window.dispatchEvent(new CustomEvent('palmplay:passwordrecovery'));
+                    }
+                    if (session?.user) writeStoredUser(profileFromSession(session));
+                    else if (event === 'SIGNED_OUT') clearStoredUser();
+                });
 
-            client.auth.onAuthStateChange((_event, session) => {
+                // Network can hang/fail here (token refresh). Never let that block
+                // the whole app from starting — fall back to the cached profile.
+                const res = await Promise.race([
+                    client.auth.getSession(),
+                    new Promise((resolve) => setTimeout(() => resolve({ data: { session: undefined }, timedOut: true }), 6000))
+                ]);
+                const session = res?.data?.session;
                 if (session?.user) writeStoredUser(profileFromSession(session));
-                else clearStoredUser();
-            });
-
-            return true;
+                else if (session === null && readStoredUser().provider === 'supabase') {
+                    // Supabase says there's no session (expired/revoked) but we still
+                    // show the user as logged in → clear so the UI doesn't lie.
+                    clearStoredUser();
+                }
+            } catch (e) {
+                console.warn('Supabase init failed; continuing offline', e);
+            }
+            return !!client;
         })();
         return initPromise;
     }
@@ -136,6 +161,33 @@
         clearStoredUser();
     }
 
+    /** Send a password-reset email. The link returns to the login page. */
+    async function resetPassword(email) {
+        if (!client) await init();
+        if (!client) throw new Error('Supabase is not configured');
+        const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: absoluteUrl('login') });
+        if (error) throw error;
+    }
+
+    /** Set a new password (after arriving from a reset link). */
+    async function updatePassword(password) {
+        if (!client) await init();
+        if (!client) throw new Error('Supabase is not configured');
+        const { data, error } = await client.auth.updateUser({ password });
+        if (error) throw error;
+        const { data: s } = await client.auth.getSession();
+        if (s?.session) writeStoredUser(profileFromSession(s.session));
+        return data;
+    }
+
+    /** Re-send the sign-up confirmation email. */
+    async function resendConfirmation(email) {
+        if (!client) await init();
+        if (!client) throw new Error('Supabase is not configured');
+        const { error } = await client.auth.resend({ type: 'signup', email, options: { emailRedirectTo: getEmailRedirectUrl() } });
+        if (error) throw error;
+    }
+
     /** Legacy local-only session (no Supabase). */
     function setLocalSession(name, email) {
         writeStoredUser({ name, email, isLoggedIn: true, provider: 'local' });
@@ -149,6 +201,9 @@
         signIn,
         signUp,
         signOut,
+        resetPassword,
+        updatePassword,
+        resendConfirmation,
         setLocalSession,
         clearStoredUser
     };
