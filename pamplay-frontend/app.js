@@ -370,32 +370,109 @@ function initAtmosphere() {
     });
 }
 
-function toggleGestureMode() {
-    state.gestureMode = !state.gestureMode;
+// ─── Hand-gesture mode (engine: gestures.js, runs fully in the browser) ──────
+function setGestureButton(mode) { // mode: 'on' | 'off' | 'loading'
+    const label = mode === 'on' ? 'Gestures: ON' : mode === 'loading' ? 'Starting camera…' : 'Gestures: OFF';
+    const iconCls = mode === 'on' ? 'fas fa-hand-sparkles' : mode === 'loading' ? 'fas fa-spinner fa-spin' : 'fas fa-hand-paper';
+
+    // Top-bar button (hidden by palmplay-ux.js on most layouts, kept in sync anyway)
     const btn = document.getElementById('gesture-toggle');
-    const icon = btn.querySelector('i');
-    const text = btn.querySelector('span');
+    if (btn) {
+        btn.classList.toggle('active', mode === 'on');
+        btn.disabled = mode === 'loading';
+        btn.innerHTML = `<i class="${iconCls}" aria-hidden="true"></i><span>${label}</span>`;
+    }
+    // Settings-menu entry (palmplay-ux.js)
+    const menuBtn = document.getElementById('settings-gestures');
+    if (menuBtn) {
+        menuBtn.disabled = mode === 'loading';
+        menuBtn.innerHTML = `<i class="${iconCls}"${mode === 'on' ? ' style="color:var(--accent)"' : ''}></i> ${label}`;
+    }
+}
+
+async function toggleGestureMode() {
+    if (!window.PalmGestures) {
+        showToast('Gesture module failed to load', 'fa-exclamation-triangle');
+        return;
+    }
+    // This click is a real user activation: unlock audio now, because later
+    // gesture-triggered play() calls are NOT user activations.
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
 
     if (state.gestureMode) {
-        btn.classList.add('active');
-        icon.className = 'fas fa-hand-pointer';
-        text.textContent = 'Gestures: ON';
-        showToast('Gesture Mode Activated', 'fa-hand-sparkles');
-    } else {
-        btn.classList.remove('active');
-        icon.className = 'fas fa-hand-paper';
-        text.textContent = 'Gestures: OFF';
+        window.PalmGestures.stop();
+        state.gestureMode = false;
+        setGestureButton('off');
         showToast('Gesture Mode Deactivated', 'fa-ghost');
+        return;
     }
 
-    // Developer Note: Hook gesture library initialization/destruction here
-    console.log(`Gesture Mode: ${state.gestureMode ? 'Enabled' : 'Disabled'}`);
+    setGestureButton('loading');
+    const res = await window.PalmGestures.start();
+    if (res.ok) {
+        state.gestureMode = true;
+        setGestureButton('on');
+        showToast('Gestures on — hold ✋ to play, ✊ to pause', 'fa-hand-sparkles');
+    } else {
+        state.gestureMode = false;
+        setGestureButton('off');
+        if (res.error !== 'cancelled') showToast(res.error, 'fa-video-slash');
+    }
 }
+
+// Camera unplugged / revoked while running → reflect it in the UI.
+window.addEventListener('palmgestures:stopped', () => {
+    state.gestureMode = false;
+    setGestureButton('off');
+});
 
 
 
 document.addEventListener('DOMContentLoaded', () => {
     const prefetchStreamCache = new Map();
+
+    // ─── Bridge for gestures.js (player functions live in this closure) ──────
+    // Defined first so it exists even if later setup code throws.
+    window.PalmPlayer = {
+        hasTrack: () => !!audio.src && state.currentPlaylistIndex !== -1,
+        // Read the real element: the state flag can lag behind (buffering, errors).
+        isPlaying: () => !!audio.src && !audio.paused,
+        play() {
+            if (!audio.src || !audio.paused) return;
+            state.isPlaying = false;   // togglePlay() branches on this flag
+            togglePlay();
+        },
+        pause() {
+            if (!audio.src || audio.paused) return;
+            state.isPlaying = true;
+            togglePlay();
+        },
+        next: () => playNext(true),    // same call the ⏭ button makes
+        prev: () => playPrev(),
+        changeVolume(delta) {
+            state.volume = Math.max(0, Math.min(1, state.volume + delta));
+            if (delta > 0 && state.isMuted) {
+                state.isMuted = false;
+                audio.muted = false;
+                const muteIcon = document.getElementById('mute-btn');
+                if (muteIcon) { muteIcon.className = 'fas fa-volume-up'; muteIcon.style.color = ''; }
+            }
+            audio.volume = state.isMuted ? 0 : state.volume;
+            setMasterVolume(state.isMuted ? 0 : state.volume);
+            if (currentSource.gain) {
+                currentSource.gain.gain.setValueAtTime(state.isMuted ? 0 : state.volume, audioCtx.currentTime);
+            }
+            const fill = document.querySelector('.volume-fill');
+            if (fill) fill.style.width = `${state.volume * 100}%`;
+            document.getElementById('volume-slider')?.setAttribute('aria-valuenow', Math.round(state.volume * 100));
+            return Math.round(state.volume * 100);
+        },
+        toggleLike() {
+            if (state.currentPlaylistIndex === -1) return;
+            const t = playlists[state.currentPlaylistIndex]?.tracks?.[state.currentTrackIndex];
+            if (t) toggleLike(t, state.currentPlaylistIndex, state.currentTrackIndex);
+        },
+    };
 
     // UI Elements
     const mainView = document.querySelector('.main-view');

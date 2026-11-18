@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link rel="preconnect" href="https://lrclib.net" crossorigin>
     <link rel="preload" href="style.css" as="style">
-    <link rel="preload" href="palmplay-ux.css?v=10" as="style">
+    <link rel="preload" href="palmplay-ux.css?v=11" as="style">
     <title>PalmPlay - Personalized Player</title>
     <link rel="canonical" href="https://palmplay-music.vercel.app/app">
     <meta property="og:title" content="PalmPlay Music">
@@ -23,7 +23,7 @@
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="apple-touch-icon" href="assets/gallery/p1.png">
     <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="palmplay-ux.css?v=10">
+    <link rel="stylesheet" href="palmplay-ux.css?v=11">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
     <script defer src="https://unpkg.com/dexie/dist/dexie.js"></script>
@@ -96,8 +96,8 @@
                     <input type="text" placeholder="Search songs, artists, albums..." class="premium-search-input" aria-label="Search">
                 </div>
                 <div class="user-controls">
-                    <button class="gesture-toggle" id="gesture-toggle" onclick="toggleGestureMode()" aria-hidden="true" tabindex="-1">
-                        <i class="fas fa-hand-paper"></i>
+                    <button type="button" class="gesture-toggle" id="gesture-toggle" onclick="toggleGestureMode()" aria-label="Toggle hand gesture controls" title="Hand gesture controls">
+                        <i class="fas fa-hand-paper" aria-hidden="true"></i>
                         <span>Gestures: OFF</span>
                     </button>
                     <button type="button" class="profile-btn" onclick="window.PalmPlayRoutes.go('login')">
@@ -192,33 +192,9 @@
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="lib/palmplay-auth.js"></script>
     <script defer src="lib/palmplay-sync.js"></script>
-    <script defer src="app.js?v=31"></script>
-    <script defer src="palmplay-ux.js?v=6"></script>
-    <script defer src="palmplay-gestures.js"></script>
-    <script>
-        let isGestureMode = false;
-        function toggleGestureMode() {
-            const btn = document.getElementById('gesture-toggle');
-            const menuBtn = document.getElementById('settings-gestures');
-            isGestureMode = !isGestureMode;
-
-            if (isGestureMode) {
-                if (btn) btn.innerHTML = '<i class="fas fa-hand-sparkles" style="color:var(--accent)"></i><span style="color:var(--accent)">Gestures: ON</span>';
-                if (menuBtn) menuBtn.innerHTML = '<i class="fas fa-hand-sparkles" style="color:var(--accent)"></i> Gestures: ON';
-                if (!window.palmGestures) {
-                    window.initGestures();
-                } else {
-                    window.palmGestures.resume();
-                }
-            } else {
-                if (btn) btn.innerHTML = '<i class="fas fa-hand-paper"></i><span>Gestures: OFF</span>';
-                if (menuBtn) menuBtn.innerHTML = '<i class="fas fa-hand-paper"></i> Gestures: OFF';
-                if (window.palmGestures) {
-                    window.palmGestures.pause();
-                }
-            }
-        }
-    </script>
+    <script defer src="gestures.js?v=1"></script>
+    <script defer src="app.js?v=32"></script>
+    <script defer src="palmplay-ux.js?v=7"></script>
 </body>
 
 </html>

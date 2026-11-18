@@ -485,8 +485,6 @@
         bindSettings() {
             const wrap = document.querySelector('.user-controls');
             if (!wrap || document.getElementById('settings-btn')) return;
-            const gesture = document.getElementById('gesture-toggle');
-            if (gesture) gesture.style.display = 'none';
 
             const btn = document.createElement('button');
             btn.id = 'settings-btn';
