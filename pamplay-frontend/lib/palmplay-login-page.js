@@ -44,6 +44,53 @@
 
     const looksLikeEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 
+    // ── Is the account service (Supabase) actually reachable? ──────────────────
+    // If the project was paused/deleted its hostname stops resolving, every request fails with a
+    // bare "Failed to fetch", and the form just looked broken. Probe once and say so plainly.
+    let backendDown = false;
+
+    /** @returns {Promise<boolean>} true if the service answered at all (any HTTP status counts). */
+    async function probeBackend() {
+        const cfg = window.PALMPLAY_SUPABASE || {};
+        if (!cfg.url) return true;                         // not configured → local mode, nothing to probe
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 6000);
+        try {
+            await fetch(`${String(cfg.url).replace(/\/$/, '')}/auth/v1/health`, {
+                headers: cfg.anonKey ? { apikey: cfg.anonKey } : {}, signal: ctl.signal, cache: 'no-store',
+            });
+            return true;
+        } catch (e) {
+            return navigator.onLine === false;             // offline is the user's connection, not the service
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    function showBackendBanner() {
+        if (document.getElementById('auth-backend-banner')) return;
+        const el = document.createElement('div');
+        el.id = 'auth-backend-banner';
+        el.setAttribute('role', 'alert');
+        el.style.cssText = 'margin:0 0 20px;padding:14px 16px;border-radius:10px;background:rgba(255,160,0,.12);' +
+            'border:1px solid rgba(255,160,0,.45);color:#ffd27a;font-size:14px;line-height:1.5;text-align:left;';
+        el.innerHTML = '<strong>Sign-in is unavailable right now.</strong> PalmPlay can’t reach its account service, ' +
+            'so logging in or signing up won’t work yet. This isn’t a problem with your email or password. ' +
+            'You can still browse and play music as a guest.';
+        const form = document.getElementById('login-form') || document.getElementById('signup-form');
+        if (form) form.before(el);
+    }
+
+    async function checkBackend() {
+        if (!useCloud()) return;
+        const ok = await probeBackend();
+        backendDown = !ok;
+        if (backendDown) {
+            console.warn('[auth] account service unreachable:', (window.PALMPLAY_SUPABASE || {}).url);
+            showBackendBanner();
+        }
+    }
+
     function friendlyAuthError(err) {
         const raw = err?.message || '';
         const msg = raw.toLowerCase();
@@ -63,7 +110,12 @@
             return 'Too many attempts. Please wait a minute and try again.';
         }
         if (msg.includes('failed to fetch') || msg.includes('network') || msg.includes('load failed')) {
-            return "Can't reach the server. Check your internet connection.";
+            // Distinguish "you're offline" from "the account service itself is gone/unreachable":
+            // blaming the connection when the service is down sends people on a wild-goose chase.
+            if (navigator.onLine === false) return "You're offline. Check your internet connection.";
+            return backendDown
+                ? "PalmPlay's account service isn't responding right now. This isn't your email or password — please try again later."
+                : "Can't reach the account service. Check your connection and try again.";
         }
         if (msg.includes('not configured')) return 'Sign-in is temporarily unavailable. Please try again later.';
         return raw || 'Something went wrong. Please try again.';
@@ -279,6 +331,8 @@
             console.warn('Auth init failed:', e);
         }
 
+        checkBackend();   // not awaited: the form stays usable while we find out
+
         // Supabase may have processed a recovery link before our listener existed.
         if (mode === 'login' && /type=recovery/.test(window.location.hash + window.location.search)) {
             showSetNewPassword();
@@ -298,5 +352,5 @@
         }
     }
 
-    window.PalmPlayLoginPage = { initAuthForms, showToast };
+    window.PalmPlayLoginPage = { initAuthForms, showToast, probeBackend, checkBackend, friendlyAuthError };
 })();
