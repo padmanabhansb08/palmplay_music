@@ -1,23 +1,29 @@
 <!DOCTYPE html>
 <html lang="en">
-<!-- Default Songs Page -->
-
 
 <head>
     <meta charset="UTF-8">
     <script>!function(){if(document.querySelector("base[data-pp-base]"))return;var p=location.pathname,b="/pamplay-frontend/";(p==="/app"||p.startsWith("/app/"))&&(b="/app/");var e=document.createElement("base");e.setAttribute("data-pp-base","1");e.href=b;document.head.insertBefore(e,document.head.firstChild)}();</script>
     <script src="lib/screen-mode.js?v=4"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Explore music by language, mood and genre on PalmPlay.">
+    <link rel="icon" type="image/png" href="assets/gallery/p1.png">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="PalmPlay">
+    <meta property="og:description" content="Explore music by language, mood and genre on PalmPlay.">
+    <meta property="og:image" content="https://palmplay-music.vercel.app/app/assets/gallery/p1.png">
+    <meta name="twitter:card" content="summary">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link rel="preconnect" href="https://unpkg.com" crossorigin>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link rel="preconnect" href="https://lrclib.net" crossorigin>
     <link rel="preconnect" href="https://aac.saavncdn.com" crossorigin>
     <link rel="preconnect" href="https://c.saavncdn.com">
-    <link rel="preload" href="style.css?v=5" as="style">
+    <link rel="preload" href="style.css?v=6" as="style">
     <link rel="preload" href="palmplay-ux.css?v=14" as="style">
     <title>PalmPlay - Explore</title>
     <link rel="canonical" href="https://palmplay-music.vercel.app/app/explore">
+    <meta property="og:title" content="PalmPlay Music">
     <meta property="og:url" content="https://palmplay-music.vercel.app/app/explore">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -26,21 +32,21 @@
     <meta name="theme-color" content="#000000">
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="apple-touch-icon" href="assets/gallery/p1.png">
-    <link rel="stylesheet" href="style.css?v=5">
+    <link rel="stylesheet" href="style.css?v=6">
     <link rel="stylesheet" href="palmplay-ux.css?v=14">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
     <script defer src="https://unpkg.com/dexie/dist/dexie.js"></script>
 </head>
 
-<body>
+<body class="view-explore">
     <div class="ambient-bg">
         <div class="gradient-orb" id="orb-1"></div>
         <div class="gradient-orb" id="orb-2"></div>
         <div class="gradient-orb" id="orb-3"></div>
     </div>
     <div id="app">
-
+        <!-- Sidebar -->
         <aside class="sidebar">
             <div class="logo">
                 <h1>PalmPlay</h1>
@@ -81,8 +87,8 @@
                 <!-- Local tracks will appear here -->
             </div>
 
-            <input type="file" id="file-input" multiple accept="audio/*" style="display: none;">
-            <input type="file" id="folder-input" webkitdirectory style="display: none;">
+            <input type="file" id="file-input" aria-label="Add music files" multiple accept="audio/*" style="display: none;">
+            <input type="file" id="folder-input" aria-label="Add a music folder" webkitdirectory style="display: none;">
         </aside>
 
         <!-- Main Content Area -->
@@ -101,7 +107,7 @@
                 </div>
                 <div class="user-controls">
                     <button type="button" class="gesture-toggle" id="gesture-toggle" onclick="toggleGestureMode()" aria-label="Toggle hand gesture controls" title="Hand gesture controls">
-                        <i class="fas fa-hand-paper"></i>
+                        <i class="fas fa-hand-paper" aria-hidden="true"></i>
                         <span>Gestures: OFF</span>
                     </button>
                     <button type="button" class="profile-btn" onclick="window.PalmPlayRoutes.go('login')">
@@ -111,23 +117,23 @@
                 </div>
             </header>
 
-            <section class="content-wrapper">
-                <!--
-                    Explore is fully rendered by app.js's renderExplore(): its own hero,
-                    language grid, mood/genre chips, and trending row are all injected
-                    into #main-content below. This page intentionally has no static
-                    hero/chip markup any more (it used to, split across a "Discover" and
-                    an "Explore" concept — now unified into one page).
-                -->
-                <div id="view-header" style="display: none;">
-                    <h2 class="greeting">Good Morning</h2>
-                    <div class="section-header">
-                        <h3 class="section-title">Default Songs</h3>
+            <!-- HERO BANNER -->
+            <div class="home-hero" id="home-hero">
+                <div class="home-hero-blur" id="home-hero-blur"></div>
+                <div class="home-hero-noise"></div>
+                <div class="home-hero-content">
+                    <div class="home-hero-text">
+                        <span class="home-hero-label">🎧 Your Vibe</span>
+                        <h2 class="greeting" id="view-header">Good Evening</h2>
+                        <p class="home-hero-sub">Music that moves with you.</p>
                     </div>
+                    <div class="home-hero-art" id="home-hero-art"></div>
                 </div>
+            </div>
 
+            <section class="content-wrapper">
                 <div id="main-content">
-                    <div class="card-grid">
+                    <div class="card-grid home-feed">
                         <!-- Content injected by app.js -->
                     </div>
                 </div>
@@ -178,7 +184,7 @@
         <div id="custom-modal">
             <h3 id="modal-title">Confirm</h3>
             <p id="modal-message">Are you sure you want to proceed?</p>
-            <input type="text" id="modal-input" class="modal-input" placeholder="Enter name...">
+            <input type="text" id="modal-input" aria-label="Name" class="modal-input" placeholder="Enter name...">
             <div style="display: flex; gap: 16px; justify-content: center;">
                 <button id="modal-cancel" class="upgrade-btn"
                     style="background: transparent; border: 1px solid rgba(255,255,255,0.2); color: white;">Cancel</button>
@@ -187,17 +193,18 @@
         </div>
     </div>
 
-    <script defer src="lib/routes.js"></script>
+    <script defer src="lib/routes.js?v=2"></script>
     <script defer src="lib/pwa.js"></script>
     <script defer src="catalog-config.js"></script>
     <script defer src="env-config.js"></script>
+    <script defer src="lib/curated-trending.js"></script>
     <script defer src="supabase-config.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script defer src="lib/palmplay-auth.js?v=2"></script>
     <script defer src="lib/palmplay-sync.js"></script>
-    <script defer src="gestures.js?v=8"></script>
-    <script defer src="app.js?v=36"></script>
-    <script defer src="palmplay-ux.js?v=7"></script>
+    <script defer src="gestures.js?v=11"></script>
+    <script defer src="app.js?v=39"></script>
+    <script defer src="palmplay-ux.js?v=8"></script>
 </body>
 
 </html>

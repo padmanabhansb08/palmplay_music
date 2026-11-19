@@ -2539,4 +2539,9 @@ body.player-bar-hidden .player-bar {
     }
 
 
-}
+}
+/* Home and Explore share one page shell (so switching keeps the song playing);
+   Explore doesn't show the Home hero banner. */
+body.view-explore #home-hero {
+    display: none !important;
+}

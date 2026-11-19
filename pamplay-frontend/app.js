@@ -371,21 +371,25 @@ function initAtmosphere() {
 }
 
 // ─── Hand-gesture mode (engine: gestures.js, runs fully in the browser) ──────
-function setGestureButton(mode) { // mode: 'on' | 'off' | 'loading'
-    const label = mode === 'on' ? 'Gestures: ON' : mode === 'loading' ? 'Starting camera…' : 'Gestures: OFF';
+let gestureLoading = false;   // true from the click until the camera + model are ready (or it fails / is cancelled)
+
+function setGestureButton(mode, pct) { // mode: 'on' | 'off' | 'loading'
+    const label = mode === 'on' ? 'Gestures: ON'
+        : mode === 'loading' ? (pct != null ? `Loading ${pct}% · tap to cancel` : 'Starting… tap to cancel')
+        : 'Gestures: OFF';
     const iconCls = mode === 'on' ? 'fas fa-hand-sparkles' : mode === 'loading' ? 'fas fa-spinner fa-spin' : 'fas fa-hand-paper';
 
     // Top-bar button (hidden by palmplay-ux.js on most layouts, kept in sync anyway)
     const btn = document.getElementById('gesture-toggle');
     if (btn) {
         btn.classList.toggle('active', mode === 'on');
-        btn.disabled = mode === 'loading';
+        btn.disabled = false;   // stays clickable while loading: a second click cancels
         btn.innerHTML = `<i class="${iconCls}" aria-hidden="true"></i><span>${label}</span>`;
     }
     // Settings-menu entry (palmplay-ux.js)
     const menuBtn = document.getElementById('settings-gestures');
     if (menuBtn) {
-        menuBtn.disabled = mode === 'loading';
+        menuBtn.disabled = false;
         menuBtn.innerHTML = `<i class="${iconCls}"${mode === 'on' ? ' style="color:var(--accent)"' : ''}></i> ${label}`;
     }
 }
@@ -399,6 +403,11 @@ async function toggleGestureMode() {
     // gesture-triggered play() calls are NOT user activations.
     if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
 
+    if (gestureLoading) {            // a second click while loading = cancel (it used to be stuck "loading")
+        window.PalmGestures.cancel();
+        return;
+    }
+
     if (state.gestureMode) {
         window.PalmGestures.stop();
         state.gestureMode = false;
@@ -407,8 +416,15 @@ async function toggleGestureMode() {
         return;
     }
 
+    gestureLoading = true;
     setGestureButton('loading');
-    const res = await window.PalmGestures.start();
+    let res;
+    try {
+        res = await window.PalmGestures.start();
+    } catch (e) {
+        res = { ok: false, error: 'Could not start gestures. Please try again.' };
+    }
+    gestureLoading = false;
     if (res.ok) {
         state.gestureMode = true;
         setGestureButton('on');
@@ -416,9 +432,24 @@ async function toggleGestureMode() {
     } else {
         state.gestureMode = false;
         setGestureButton('off');
-        if (res.error !== 'cancelled') showToast(res.error, 'fa-video-slash');
+        showToast(res.error === 'cancelled' ? 'Gesture loading cancelled' : res.error,
+            res.error === 'cancelled' ? 'fa-ban' : 'fa-video-slash');
     }
 }
+
+// Live % on the button while the hand model downloads.
+window.addEventListener('palmgestures:progress', (e) => {
+    if (gestureLoading && e.detail && e.detail.phase === 'download') setGestureButton('loading', e.detail.pct);
+    else if (gestureLoading && e.detail && e.detail.phase === 'init') setGestureButton('loading');
+});
+
+// Start fetching the model as soon as the user shows intent (hover / focus / touch on the
+// Gestures button or the Settings menu), so by the time they click it is often already cached.
+['pointerover', 'focusin', 'touchstart'].forEach((ev) => document.addEventListener(ev, (e) => {
+    if (e.target && e.target.closest && e.target.closest('#gesture-toggle, #settings-gestures, #settings-btn')) {
+        window.PalmGestures?.preload?.();
+    }
+}, { passive: true }));
 
 // Camera unplugged / revoked while running → reflect it in the UI.
 window.addEventListener('palmgestures:stopped', () => {
@@ -772,8 +803,16 @@ document.addEventListener('DOMContentLoaded', () => {
             this.go(ppRoutes().isExplorePage() ? 'explore' : 'home', true);
         },
         go(view, fromHistory = false) {
-            if (!fromHistory) this.push(view);
             const onExplore = ppRoutes().isExplorePage();
+
+            // Home ↔ Explore switch IN PLACE (same document → the <audio> element is never
+            // touched, so the song keeps playing). A fresh history entry for a normal
+            // navigation; replace the current one when stepping "back" inside the app.
+            if ((view === 'explore' && !onExplore) || (view === 'home' && onExplore)) {
+                if (spaGo(view, { history: fromHistory ? 'replace' : 'push' })) return;
+            }
+
+            if (!fromHistory) this.push(view);
 
             if (view === 'explore' && onExplore) {
                 state.currentView = 'explore';
@@ -831,6 +870,55 @@ document.addEventListener('DOMContentLoaded', () => {
             window.PalmPlayUX?.activateBottomNav?.('home');
         }
     };
+
+    // ─── In-place navigation between Home and Explore (the song keeps playing) ───────
+    // Home and Explore used to be two separate pages, so every switch reloaded the whole
+    // app: the audio stopped, then "resume" had to start it again — which browsers often
+    // refuse to do without a click. They now share one document and switch in place.
+    const SPA_TITLES = { home: 'PalmPlay - Personalized Player', explore: 'PalmPlay - Explore' };
+    const normPath = (p) => (p || '/').replace(/\/+$/, '') || '/';
+
+    /** @param {'home'|'explore'} key  @param {{history?: 'push'|'replace'|'none'}} opts @returns {boolean} handled in place? */
+    function spaGo(key, opts = {}) {
+        if (key !== 'home' && key !== 'explore') return false;
+        const mode = opts.history || 'push';
+        const routes = ppRoutes();
+        const targetPath = new URL(routes.page(key), window.location.origin).pathname;
+        const sameUrl = normPath(window.location.pathname) === normPath(targetPath);
+        const alreadyThere = sameUrl && state.currentView === key;
+
+        if (mode !== 'none' && !sameUrl) {
+            try {
+                history[mode === 'replace' ? 'replaceState' : 'pushState']({ ppView: key }, '', routes.page(key));
+            } catch (e) {
+                return false;      // can't change the URL here → let the caller fall back to a normal page load
+            }
+        }
+        if (mode === 'push') window.PalmPlayNav.push(key);
+
+        document.title = SPA_TITLES[key];
+        document.querySelector('link[rel="canonical"]')?.setAttribute('href', `${window.location.origin}${routes.page(key)}`);
+        document.body.classList.toggle('view-explore', key === 'explore');
+        document.querySelectorAll('.nav-item[data-pp-route]').forEach((a) => {
+            a.classList.toggle('active', a.getAttribute('data-pp-route') === key);
+        });
+
+        if (alreadyThere) {
+            if (mode !== 'none') document.querySelector('.main-view')?.scrollTo?.({ top: 0 });
+            return true;
+        }
+        window.PalmPlayNav.go(key, true);   // (the URL now matches `key`, so this renders the view)
+        window.PalmPlayUX?.activateBottomNav?.(key);
+        document.querySelector('.main-view')?.scrollTo?.({ top: 0 });
+        return true;
+    }
+
+    window.PalmPlaySPA = { go: spaGo, current: () => (ppRoutes().isExplorePage() ? 'explore' : 'home') };
+
+    // Browser Back / Forward between the two views (entries created by spaGo's pushState).
+    window.addEventListener('popstate', () => {
+        spaGo(window.PalmPlaySPA.current(), { history: 'none' });
+    });
 
     window.PalmPlayQueue = {
         getUpNext() {
@@ -1292,23 +1380,12 @@ document.addEventListener('DOMContentLoaded', () => {
         navLinks.forEach(link => {
             link.addEventListener('click', (e) => {
                 const href = link.getAttribute('href') || '';
-                const onExplorePage = ppRoutes().isExplorePage();
                 const routeKey = link.getAttribute('data-pp-route') || '';
-                const isExplore = routeKey === 'explore' || href.includes('explore');
-
-                if ((routeKey === 'home' || href.includes('home')) && !ppRoutes().isHomePage()) return;
-                if (isExplore && !onExplorePage) return;
-
-                e.preventDefault();
-                navLinks.forEach(l => l.classList.remove('active'));
-                link.classList.add('active');
-                window.PalmPlayUX?.activateBottomNav?.(isExplore ? 'explore' : 'home');
-
-                if (isExplore) {
-                    window.PalmPlayNav.go('explore');
-                } else {
-                    window.PalmPlayNav.go('home');
-                }
+                const key = routeKey || (href.includes('explore') ? 'explore' : (href.includes('home') ? 'home' : ''));
+                if (key !== 'home' && key !== 'explore') return;     // e.g. Search: handled elsewhere
+                // Switch in place so the song keeps playing; if that's impossible, the browser
+                // follows the link normally.
+                if (spaGo(key)) e.preventDefault();
             });
         });
 
@@ -1319,7 +1396,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         searchInput.addEventListener('focus', () => {
             if (ppRoutes().isHomePage() && state.currentView !== 'explore') {
-                window.location.href = ppRoutes().page('explore');
+                if (!spaGo('explore')) window.location.href = ppRoutes().page('explore');
             }
         });
 
@@ -1753,9 +1830,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v7';
+    const HOME_FEED_CACHE_KEY = 'palmplay_home_feed_v8';
     const HOME_FEED_TTL_MS = 5 * 60 * 1000;
-    const CURATED_RESOLVED_CACHE_KEY = 'palmplay_curated_resolved_v1';
+    const CURATED_RESOLVED_CACHE_KEY = 'palmplay_curated_resolved_v2';
     const CURATED_RESOLVED_TTL_MS = 60 * 60 * 1000;
     const catalogRequestInflight = new Map();
     const PLAY_HISTORY_KEY = 'palmplay_play_history';
@@ -1997,8 +2074,18 @@ document.addEventListener('DOMContentLoaded', () => {
             duration: parseInt(t.duration, 10) || 200,
             url: streamUrl,
             art: img,
+            plays: Number(t.playCount) || 0,
             isCatalog: true
         };
+    }
+
+    /** 4485049 → "4.5M", 58231 → "58K", 920 → "920"; empty when unknown. */
+    function formatPlays(n) {
+        n = Number(n) || 0;
+        if (n <= 0) return '';
+        if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
+        if (n >= 1e3) return `${Math.round(n / 1e3)}K`;
+        return String(n);
     }
 
     function unwrapCatalogData(data) {
@@ -3658,7 +3745,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function createLangTrackCard(track, plIndex, tIdx) {
         const card = document.createElement('div');
         card.className = 'lang-track-card card--has-menu';
-        const playsLabel = track.plays > 0 ? `${(track.plays / 1000).toFixed(0)}K` : '';
+        const playsLabel = formatPlays(track.plays);
         card.innerHTML = `
             <div class="lang-track-art" style="background-image: url('${escapeHtml(track.art || DEFAULT_ART_URL)}')">
                 <div class="play-btn-overlay"><i class="fas fa-play"></i></div>
@@ -4040,6 +4127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function renderHome() {
         document.body.classList.remove('lang-view-active');
         state.currentView = 'home';
+        document.body.classList.toggle('view-explore', ppRoutes().isExplorePage());
         setHeaderSearchVisible(false);
         viewHeader.style.display = 'block';
         greetingEl.style.display = 'block';
@@ -4134,6 +4222,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function renderExplore() {
         document.body.classList.remove('lang-view-active');
         state.currentView = 'explore';
+        document.body.classList.add('view-explore');   // hides the Home hero banner (shared page shell)
         setHeaderSearchVisible(true);
         if (viewHeader) viewHeader.style.display = 'none';
         if (exploreHero) exploreHero.style.display = 'none';
@@ -5047,7 +5136,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const q = String(query || '').trim();
         if (!q) return [];
 
-        const cacheKey = `${q.toLowerCase()}::${limit}`;
+        const cacheKey = `v2::${q.toLowerCase()}::${limit}`;   // v2: results now carry real play counts
 
         if (catalogRequestInflight.has(cacheKey)) {
             return catalogRequestInflight.get(cacheKey);
@@ -5157,7 +5246,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return {
                     ...parsed,
                     language: t.language || '',
-                    plays: Math.floor(Math.random() * 50000) + 10000
+                    // Real play count from the catalog (it used to be a random 10K–60K number,
+                    // which both showed fake stats and made the result order change on every search).
+                    plays: parsed.plays || 0
                 };
             }).filter(Boolean);
 
@@ -5178,7 +5269,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (tn.includes(tk)) s += 7;
                     if (ta.includes(tk)) s += 4;
                 });
-                s += Math.min(30, (track.plays || 0) / 4000);
+                // Log scale: real counts range from hundreds to hundreds of millions.
+                s += Math.min(30, Math.log10((track.plays || 0) + 10) * 4.5);
                 return s;
             };
 
@@ -5546,7 +5638,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const desc = card.querySelector('.card-desc');
                             if (desc) {
                                 const playsLabel = track.plays > 0
-                                    ? `${(track.plays / 1000).toFixed(0)}K plays`
+                                    ? `${formatPlays(track.plays)} plays`
                                     : track.album;
                                 desc.innerHTML = `${buildTrackMetaLine(track)}<div class="meta-line meta-plays">${escapeHtml(playsLabel)}</div>`;
                             }

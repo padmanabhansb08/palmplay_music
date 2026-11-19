@@ -180,6 +180,9 @@
                     const key = btn.dataset.bottomNav;
                     this.activateBottomNav(key);
 
+                    // Home/Explore switch in place — a page load would cut the song off.
+                    if ((key === 'home' || key === 'explore') && window.PalmPlaySPA?.go(key)) return;
+
                     if (key === 'home') {
                         if (!isHomePage) {
                             window.location.href = routes?.page('home') || 'home.html';

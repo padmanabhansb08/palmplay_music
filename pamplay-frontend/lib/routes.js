@@ -63,9 +63,16 @@
         }
     }
 
+    /** Home/Explore can switch in place (no reload) when the app is loaded — the song keeps playing. */
+    function goInPlace(pageKey) {
+        return (pageKey === 'home' || pageKey === 'explore') &&
+            !!(window.PalmPlaySPA && window.PalmPlaySPA.go(pageKey));
+    }
+
     function go(pageKey) {
         const url = pages[pageKey];
         if (!url) return;
+        if (goInPlace(pageKey)) return;
         savePlaybackState();
         document.body.classList.add('page-leaving');
         setTimeout(() => {
@@ -92,6 +99,16 @@
             (href.startsWith('/app') && !href.includes('login') &&
              !href.includes('signup') && !href.includes('premium'));
         if (isInternal) {
+            // Home ↔ Explore: switch in place (no page load) so the audio never stops.
+            const routeKey = anchor.getAttribute('data-pp-route') || '';
+            const key = routeKey === 'home' || routeKey === 'explore' ? routeKey
+                : href.includes('explore') ? 'explore'
+                : (href.includes('home.html') || /^\/app\/?$/.test(href.split('?')[0])) ? 'home' : '';
+            if (key && !anchor.target && !e.ctrlKey && !e.metaKey && !e.shiftKey && goInPlace(key)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
             e.preventDefault();
             savePlaybackState();
             document.body.classList.add('page-leaving');
