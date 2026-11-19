@@ -490,6 +490,27 @@ document.addEventListener('DOMContentLoaded', () => {
             if (document.body.classList.contains('now-playing-open')) window.closeNowPlaying?.();
             window.toggleQueue?.();
         },
+        /**
+         * 👏 Clap: play the last song that played.
+         *  - something loaded and paused → resume it
+         *  - something already playing   → leave it ('already')
+         *  - nothing loaded (fresh page) → start the most recent song from play history
+         * @returns {'resumed'|'started'|'already'|'none'}
+         */
+        playLast() {
+            const loaded = !!audio.src && !String(audio.src).startsWith('data:') && state.currentPlaylistIndex !== -1;
+            if (loaded) {
+                if (!audio.paused) return 'already';
+                window.PalmPlayer.play();
+                return 'resumed';
+            }
+            const last = getPlayHistory()[0];
+            if (!last || !last.name) return 'none';
+            const plIndex = upsertTempPlaylist('home_last_played', 'Last played', [last]);
+            playTrack(plIndex, 0);
+            return 'started';
+        },
+
         /** Dismiss the top-most overlay: full-screen player first, then the queue. */
         dismissOverlay() {
             if (document.body.classList.contains('now-playing-open')) { window.closeNowPlaying?.(); return 'player'; }

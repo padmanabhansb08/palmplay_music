@@ -13,6 +13,9 @@
 //   3️⃣ Three fingers (hold)    → Open / close the queue
 //   👋 Swipe hand left / right → Previous / next track
 //   ⬆️⬇️ Swipe OPEN hand up / down → Open / close the full-screen player
+//   👏 Clap (two hands)         → Play the last song that played (resume it, or start the
+//                                 most recent one from history if nothing is loaded).
+//                                 While two hands are visible, poses/swipes pause.
 //
 // Exposes window.PalmGestures = { start, stop, isRunning, Interpreter }
 // and talks to the player only through window.PalmPlayer (defined in app.js).
@@ -46,6 +49,18 @@
         swipeMaxDx: 0.15,       // …with little sideways drift; also needs an OPEN hand (see openHand)
         lostHandResetMs: 250,   // hand missing this long → reset everything (counts as "released");
                                 // shorter gaps (dropped detection frames, motion blur) keep all state
+        // 👏 Clap (two hands). Distances are in "hand sizes" (wrist → middle knuckle),
+        // so they don't depend on how far you sit from the camera.
+        clapApart: 2.2,         // hands must first be at least this far apart (seen in ≥2 frames)…
+        clapTouch: 1.35,        // …then come within this distance (palms meeting)…
+        clapVanish: 1.9,        // …or, if a hand vanishes on contact (overlap confuses the detector),
+                                //    they must have been this close in the last frame they were both seen
+        clapMaxApproachMs: 450, // from the last "apart" frame to contact
+        clapMinSpeed: 5,        // hand-sizes per second closing speed: a deliberate clap, not hands slowly meeting
+        clapMaxAsymmetry: 0.35, // in a clap BOTH hands move, so the midpoint between them barely shifts
+                                //    (0.5 = one hand stationary, e.g. a second hand sliding in beside a still one)
+        clapWindowMs: 700,      // history kept for the check
+        clapCooldownMs: 1500,   // one clap = one action
     };
 
     // ── Finger geometry (rule-based, from MediaPipe's 21 hand landmarks) ──────
@@ -149,6 +164,23 @@
         Three_Fingers: { action: 'queue', label: 'Queue',         icon: 'fa-list',        emoji: '3️⃣' },
     };
 
+    /**
+     * Geometry of a pair of hands: `d` = distance between palm centres in units of the
+     * average hand size; `mx,my` = midpoint between them; `hs` = average hand size.
+     * `aspect` = frame width/height, so horizontal and vertical distances are comparable.
+     */
+    function handPair(a, b, aspect = 4 / 3) {
+        const size = (lm) => Math.hypot((lm[LM.WRIST].x - lm[LM.MIDDLE_MCP].x) * aspect, lm[LM.WRIST].y - lm[LM.MIDDLE_MCP].y);
+        const centre = (lm) => ({
+            x: ((lm[LM.WRIST].x + lm[LM.INDEX_MCP].x + lm[LM.MIDDLE_MCP].x + lm[LM.PINKY_MCP].x) / 4) * aspect,
+            y: (lm[LM.WRIST].y + lm[LM.INDEX_MCP].y + lm[LM.MIDDLE_MCP].y + lm[LM.PINKY_MCP].y) / 4,
+        });
+        const ca = centre(a), cb = centre(b);
+        const hs = Math.max(1e-6, (size(a) + size(b)) / 2);
+        return { d: Math.hypot(ca.x - cb.x, ca.y - cb.y) / hs, mx: (ca.x + cb.x) / 2, my: (ca.y + cb.y) / 2, hs };
+    }
+    const handDistance = (a, b, aspect) => handPair(a, b, aspect).d;
+
     // ── Pure state machine: frames in, actions out. No DOM, easy to test. ──────
     class Interpreter {
         constructor(cfg = CONFIG, map = GESTURE_MAP) {
@@ -156,6 +188,7 @@
             this.map = map;
             this.lastFire = -Infinity;   // last discrete pose action
             this.lastSwipe = -Infinity;  // swipes have their own cooldown
+            this.lastClap = -Infinity;
             this.reset();
         }
 
@@ -170,6 +203,7 @@
             this.conf = null;           // smoothed confidence of the current candidate
             this.stillSince = null;     // when the hand last became still
             this.anchor = null;         // rested position a swipe is measured from
+            this.twoHist = [];          // recent two-hand distances [{t, d}] for clap detection
         }
 
         /**
@@ -198,14 +232,64 @@
         }
 
         /**
+         * 👏 Clap detector. `d` = current distance between the two hands (in hand
+         * sizes), or null when fewer than two hands are visible this frame.
+         * A clap = hands clearly apart (≥ clapApart, in ≥2 frames) → quickly (≤ clapMaxApproachMs,
+         * ≥ clapMinSpeed hand-sizes/s) to contact (≤ clapTouch), where "contact" may also be
+         * one hand vanishing right after they were within clapVanish.
+         */
+        clapCheck(t, pair) {
+            const c = this.cfg;
+            if (pair) this.twoHist.push({ t, ...pair });
+            while (this.twoHist.length && t - this.twoHist[0].t > c.clapWindowMs) this.twoHist.shift();
+            const h = this.twoHist;
+            if (t - this.lastClap < c.clapCooldownMs || h.length < 3) return false;
+
+            const now = h[h.length - 1];                 // current frame, or the last one both hands were seen
+            if (pair) {
+                if (now.d > c.clapTouch) return false;
+            } else if (t - now.t > 160 || now.d > c.clapVanish) {
+                return false;
+            }
+            // Most recent frame where the hands were still clearly apart.
+            let apartIdx = -1, apartCount = 0;
+            for (let i = 0; i < h.length; i++) if (h[i].d >= c.clapApart) { apartIdx = i; apartCount++; }
+            if (apartIdx < 0 || apartCount < 2) return false;
+            const a = h[apartIdx];
+            const dtMs = now.t - a.t;
+            if (dtMs <= 0 || dtMs > c.clapMaxApproachMs) return false;
+            const closing = a.d - now.d;                 // hand sizes
+            if (closing / (dtMs / 1000) < c.clapMinSpeed) return false;
+            // Both hands must move: the midpoint between them should stay roughly put.
+            const midShift = Math.hypot(now.mx - a.mx, now.my - a.my) / ((a.hs + now.hs) / 2);
+            if (midShift > c.clapMaxAsymmetry * closing) return false;
+
+            this.lastClap = t;
+            this.twoHist = [];
+            return true;
+        }
+
+        /**
          * @param {{t:number, gesture?:string|null, score?:number, wrist?:{x:number,y:number}|null,
-         *          landmarks?:{x:number,y:number}[]}} f
-         *        wrist/landmarks are in raw (un-mirrored) camera coordinates, 0..1
+         *          landmarks?:{x:number,y:number}[], others?:{x:number,y:number}[][], aspect?:number}} f
+         *        wrist/landmarks are in raw (un-mirrored) camera coordinates, 0..1.
+         *        `others` = landmarks of any additional hands (used for clap detection).
          * @returns {{action:string|null, via?:string, candidate:string|null, progress:number, moving:boolean}}
          */
         update(f) {
             const c = this.cfg;
             const t = f.t;
+
+            // 👏 Two hands (or one just vanished on contact): is this a clap?
+            const twoHands = !!(f.landmarks && f.others && f.others.length);
+            const pair = twoHands ? handPair(f.landmarks, f.others[0], f.aspect || 4 / 3) : null;
+            if (this.clapCheck(t, pair)) {
+                this.lastFire = t;           // swallow any pose/swipe that would fire right after
+                this.lastSwipe = t;
+                this.track = []; this.anchor = null; this.stillSince = null;
+                this.candidate = null; this.firedFor = null; this.votes = [];
+                return { action: 'playLast', via: 'clap', candidate: null, progress: 0, moving: true, twoHands };
+            }
 
             if (!f.wrist) {
                 if (t - this.lastSeen > c.lostHandResetMs) this.reset();
@@ -232,7 +316,9 @@
             }
             if (this.anchor && t - this.anchor.t > c.swipeWindowMs) this.anchor = null;
 
-            if (this.anchor && t - this.lastSwipe >= c.cooldownMs) {
+            // With two hands in view the "primary" hand can swap between frames, which
+            // would look like a swipe — so swipes (and poses, below) pause until one hand leaves.
+            if (!twoHands && this.anchor && t - this.lastSwipe >= c.cooldownMs) {
                 // Camera image is un-mirrored: when the user moves their hand to
                 // THEIR right, x DEcreases. Flip so +dx = user's right.
                 const dx = -(f.wrist.x - this.anchor.x);
@@ -280,7 +366,7 @@
             if (!this.candidate) return { action: null, candidate: null, progress: 0, moving };
 
             // A moving hand is probably mid-swipe / repositioning, not a deliberate pose.
-            if (moving) this.since = t;
+            if (moving || twoHands) this.since = t;
 
             // Smoothed confidence → confident poses fire sooner.
             const s = label === this.candidate ? (fl.score ?? 0) : 0;
@@ -304,7 +390,7 @@
                     action = def.action;
                 }
             }
-            return { action, via: action ? 'pose' : undefined, candidate: this.candidate, progress, moving };
+            return { action, via: action ? 'pose' : undefined, candidate: this.candidate, progress, moving, twoHands };
         }
     }
 
@@ -315,6 +401,7 @@
     let rafId = null;
     let running = false;
     let lastVideoTime = -1;
+    let lastPrimary = null;     // wrist position of the hand that drives poses/swipes
     let ui = null;
     const interpreter = new Interpreter();
 
@@ -329,7 +416,7 @@
             const opts = (delegate) => ({
                 baseOptions: { modelAssetPath: MODEL_URL, delegate },
                 runningMode: 'VIDEO',
-                numHands: 1,
+                numHands: 2,            // second hand is only used for the 👏 clap
                 minHandDetectionConfidence: 0.6,
                 minHandPresenceConfidence: 0.6,
                 minTrackingConfidence: 0.5,
@@ -404,6 +491,7 @@
                 <div><span>👋</span> Swipe left/right: prev/next</div>
                 <div><span>⬆️</span> Swipe open hand up: full player</div>
                 <div><span>⬇️</span> Swipe open hand down: close</div>
+                <div><span>👏</span> Clap (two hands): play last song</div>
             </div>`;
         document.body.appendChild(root);
         const guide = root.querySelector('.gesture-cam-guide');
@@ -429,29 +517,33 @@
     const HAND_LINKS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
                         [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
-    function drawHand(landmarks) {
+    /** Draw every detected hand; the one driving poses/swipes is red, the other blue. */
+    function drawHands(hands, primaryIdx) {
         const { canvas, ctx, video } = ui;
         if (canvas.width !== video.videoWidth) {
             canvas.width = video.videoWidth || 320;
             canvas.height = video.videoHeight || 240;
         }
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (!landmarks) return;
         const W = canvas.width, H = canvas.height;
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-        ctx.beginPath();
-        for (const [a, b] of HAND_LINKS) {
-            ctx.moveTo(landmarks[a].x * W, landmarks[a].y * H);
-            ctx.lineTo(landmarks[b].x * W, landmarks[b].y * H);
-        }
-        ctx.stroke();
-        ctx.fillStyle = '#FF1744';
-        for (const p of landmarks) {
+        hands.forEach((landmarks, idx) => {
+            if (!landmarks) return;
+            const primary = idx === primaryIdx;
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(255,255,255,0.85)';
             ctx.beginPath();
-            ctx.arc(p.x * W, p.y * H, 4, 0, Math.PI * 2);
-            ctx.fill();
-        }
+            for (const [a, b] of HAND_LINKS) {
+                ctx.moveTo(landmarks[a].x * W, landmarks[a].y * H);
+                ctx.lineTo(landmarks[b].x * W, landmarks[b].y * H);
+            }
+            ctx.stroke();
+            ctx.fillStyle = primary ? '#FF1744' : '#3DA5FF';
+            for (const p of landmarks) {
+                ctx.beginPath();
+                ctx.arc(p.x * W, p.y * H, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
     }
 
     function perform(action) {
@@ -478,6 +570,13 @@
             case 'queue':   P.toggleQueue(); break;
             case 'openPlayer': P.openNowPlaying(); break;
             case 'closePlayer': if (!P.dismissOverlay()) toast('Nothing to close', 'fa-chevron-down'); break;
+            case 'playLast': {                                   // 👏 clap
+                const r = P.playLast();
+                if (r === 'already') toast('Already playing ♫', 'fa-music');
+                else if (r === 'none') toast('No recent song yet — play one first', 'fa-clock');
+                else toast('👏 Playing your last song', 'fa-play');
+                break;
+            }
         }
     }
 
@@ -497,9 +596,30 @@
             return;
         }
 
-        const landmarks = result.landmarks && result.landmarks[0];
-        const top = result.gestures && result.gestures[0] && result.gestures[0][0];
-        drawHand(landmarks);
+        const out = handleResult(result, now);
+        if (out.action) perform(out.action);
+    }
+
+    /** One frame of recognizer output → draw, interpret, update HUD. Returns the interpreter's output. */
+    function handleResult(result, now) {
+        const video = ui.video;
+        // Up to two hands. MediaPipe's hand order isn't stable between frames, so the
+        // "primary" hand (poses/swipes) is the one nearest where the last one was.
+        const hands = result.landmarks || [];
+        const gests = result.gestures || [];
+        let pi = 0;
+        if (hands.length > 1 && lastPrimary) {
+            let best = Infinity;
+            hands.forEach((lm, i) => {
+                const dd = Math.hypot(lm[0].x - lastPrimary.x, lm[0].y - lastPrimary.y);
+                if (dd < best) { best = dd; pi = i; }
+            });
+        }
+        const landmarks = hands[pi] || null;
+        const others = hands.filter((_, i) => i !== pi);
+        const top = gests[pi] && gests[pi][0];
+        lastPrimary = landmarks ? { x: landmarks[0].x, y: landmarks[0].y } : null;
+        drawHands(hands, pi);
 
         const out = interpreter.update({
             t: now,
@@ -507,16 +627,19 @@
             score: top ? top.score : 0,
             wrist: landmarks ? { x: landmarks[0].x, y: landmarks[0].y } : null,
             landmarks: landmarks || null,
+            others,
+            aspect: (video.videoWidth && video.videoHeight) ? video.videoWidth / video.videoHeight : 4 / 3,
         });
 
         const def = out.candidate && GESTURE_MAP[out.candidate];
-        ui.label.textContent = landmarks
-            ? (def ? `${def.emoji} ${def.label}` : (out.moving ? 'Moving…' : 'Hand detected'))
-            : 'Show your hand';
+        ui.label.textContent = out.via === 'clap' ? '👏 Clap!'
+            : others.length ? '🙌 Two hands — clap to play'
+            : landmarks
+                ? (def ? `${def.emoji} ${def.label}` : (out.moving ? 'Moving…' : 'Hand detected'))
+                : 'Show your hand';
         ui.meter.style.width = `${Math.round(out.progress * 100)}%`;
         ui.root.classList.toggle('firing', !!out.action);
-
-        if (out.action) perform(out.action);
+        return out;
     }
 
     function describeCameraError(e) {
@@ -622,5 +745,6 @@
     }
 
     window.PalmGestures = { start, stop, isRunning: () => running, Interpreter, CONFIG, GESTURE_MAP,
-        analyzeHand, geometryPose, poseFits };
+        analyzeHand, geometryPose, poseFits, handDistance, handPair,
+        _handleResult: handleResult, _perform: perform, _interpreter: interpreter };   // test hooks
 })();

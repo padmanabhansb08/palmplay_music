@@ -1,5 +1,5 @@
 /* PalmPlay service worker — offline app shell (streaming stays network-only) */
-const CACHE_NAME = 'palmplay-shell-v25';
+const CACHE_NAME = 'palmplay-shell-v28';
 
 // Keep this to the minimal app shell only. The fetch handler below already
 // caches every same-origin GET at runtime, so eagerly precaching the JS
