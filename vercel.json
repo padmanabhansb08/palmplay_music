@@ -10,46 +10,124 @@
     }
   ],
   "rewrites": [
-    { "source": "/app", "destination": "/pamplay-frontend/home.html" },
-    { "source": "/app/explore", "destination": "/pamplay-frontend/explore.html" },
-    { "source": "/app/login", "destination": "/pamplay-frontend/login.html" },
-    { "source": "/app/signup", "destination": "/pamplay-frontend/signup.html" },
-    { "source": "/app/premium", "destination": "/pamplay-frontend/premium.html" },
-    { "source": "/app/sw.js", "destination": "/pamplay-frontend/sw.js" },
-    { "source": "/app/manifest.webmanifest", "destination": "/pamplay-frontend/manifest.webmanifest" },
-    { "source": "/app/:path*", "destination": "/pamplay-frontend/:path*" }
+    {
+      "source": "/favicon.ico",
+      "destination": "/pamplay-frontend/assets/gallery/p1.png"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "/pamplay-frontend/robots.txt"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/pamplay-frontend/sitemap.xml"
+    },
+    {
+      "source": "/app",
+      "destination": "/pamplay-frontend/home.html"
+    },
+    {
+      "source": "/app/explore",
+      "destination": "/pamplay-frontend/explore.html"
+    },
+    {
+      "source": "/app/login",
+      "destination": "/pamplay-frontend/login.html"
+    },
+    {
+      "source": "/app/signup",
+      "destination": "/pamplay-frontend/signup.html"
+    },
+    {
+      "source": "/app/premium",
+      "destination": "/pamplay-frontend/premium.html"
+    },
+    {
+      "source": "/app/sw.js",
+      "destination": "/pamplay-frontend/sw.js"
+    },
+    {
+      "source": "/app/manifest.webmanifest",
+      "destination": "/pamplay-frontend/manifest.webmanifest"
+    },
+    {
+      "source": "/app/:path*",
+      "destination": "/pamplay-frontend/:path*"
+    }
   ],
   "headers": [
     {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(self), microphone=(), geolocation=(), payment=()"
+        }
+      ]
+    },
+    {
       "source": "/pamplay-frontend/sw.js",
       "headers": [
-        { "key": "Service-Worker-Allowed", "value": "/" },
-        { "key": "Cache-Control", "value": "no-cache" }
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
       ]
     },
     {
       "source": "/app/sw.js",
       "headers": [
-        { "key": "Service-Worker-Allowed", "value": "/" },
-        { "key": "Cache-Control", "value": "no-cache" }
+        {
+          "key": "Service-Worker-Allowed",
+          "value": "/"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
       ]
     },
     {
       "source": "/pamplay-frontend/manifest.webmanifest",
       "headers": [
-        { "key": "Content-Type", "value": "application/manifest+json" }
+        {
+          "key": "Content-Type",
+          "value": "application/manifest+json"
+        }
       ]
     },
     {
       "source": "/(.*)\\.(js|css)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
       ]
     },
     {
       "source": "/(.*)\\.(png|jpg|jpeg|svg|woff2?|ttf|eot)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
       ]
     }
   ]

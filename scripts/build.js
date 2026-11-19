@@ -14,6 +14,8 @@ fs.mkdirSync(distDir, { recursive: true });
 
 console.log('Copying index.html and pamplay-frontend to dist...');
 fs.cpSync(path.join(rootDir, 'index.html'), path.join(distDir, 'index.html'));
+// Branded 404 page (Vercel serves /404.html for unknown URLs instead of a bare "404" text)
+fs.cpSync(path.join(rootDir, '404.html'), path.join(distDir, '404.html'));
 fs.cpSync(srcDir, path.join(distDir, 'pamplay-frontend'), { recursive: true });
 
 // Production pages are served at /app (no trailing slash). Without a static

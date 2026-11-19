@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /app
+Allow: /app/explore
+Disallow: /app/login
+Disallow: /app/signup
+
+Sitemap: https://palmplay-music.vercel.app/sitemap.xml
